@@ -1,11 +1,11 @@
 # Manual do Usuário — AP AI Studio
 
 > Guia didático, escrito para quem nunca usou esse tipo de ferramenta. Cobre todas as
-> funções que existem hoje no pipeline (2026-07-02), verificadas ao vivo contra o código
-> real (`run_vfx.py`, `tts_synthesize.py`, `demucs_separate.py`) e o estado real do
-> servidor — não é um resumo do `PROMPT_MASTER.md`, é um manual operacional derivado dele.
-> Onde alguma coisa ainda não está pronta ou tem uma limitação real, isso está dito
-> explicitamente, sem maquiagem.
+> funções que existem hoje no pipeline (atualizado em 2026-07-03), verificadas ao vivo
+> contra o código real (`run_vfx.py`, `tts_synthesize.py`, `demucs_separate.py`,
+> `webui/`) e o estado real do servidor — não é um resumo do `PROMPT_MASTER.md`, é um
+> manual operacional derivado dele. Onde alguma coisa ainda não está pronta ou tem uma
+> limitação real, isso está dito explicitamente, sem maquiagem.
 
 > 💡 **Atalho:** existem comandos curtos (`vfx-rosto`, `vfx-video`, `vfx-ajuda` etc.) que
 > já resolvem o ambiente Conda certo por trás e evitam digitar o comando completo do
@@ -14,8 +14,8 @@
 > "por baixo do capô", pra você entender o que cada atalho está fazendo de verdade.
 
 > 🖥️ **Interface web:** se preferir nem usar terminal, existe uma interface gráfica
-> acessível pelo navegador (`vfx-web`) — veja a seção 11. Por enquanto (Fase A) ela cobre
-> Status, Trocar Rosto e Gerar Vídeo; o resto das funções chega na Fase B.
+> acessível pelo navegador (`vfx-web`) — veja a seção 11. Já cobre as 10 funções do
+> pipeline (Fases A e B completas).
 
 ---
 
@@ -535,6 +535,11 @@ segurança de 30GB do Gate 3 é levada a sério — evite deixar o disco chegar 
   sem precisar desenhar máscara) não existe — a máscara é sempre manual.
 - **Nomes exatos das vozes embutidas do TTS** não foram levantados/confirmados neste
   manual — use `--speaker-wav` como alternativa garantida se um nome específico falhar.
+- **ComfyUI não tem supervisão automática (`systemd`)** — só a interface web tem essa
+  opção (`vfx-web-enable`, seção 11). Decisão deliberada: o modo `video` já mata e
+  religa o ComfyUI dentro da própria jaula de memória toda vez que roda, e um serviço
+  com reinício automático brigaria com isso. Se o ComfyUI cair, religue com `vfx-ligar`
+  ou o botão "Ligar" da interface web.
 
 ---
 
@@ -613,14 +618,27 @@ estiver desligado.
 
 ### Como ligar
 
+> ✅ **Já está ligada agora**, na versão supervisionada (ativada em 2026-07-03, ver
+> abaixo) — não precisa fazer nada pra usar, só abrir o navegador (próxima seção). O
+> texto abaixo serve pra quando você quiser desligar/religar/trocar de modo.
+
+Duas formas, escolha a que preferir:
+
 ```bash
-vfx-web
+vfx-web            # primeiro plano - fica preso ao terminal, Ctrl+C desliga
+vfx-web-enable      # supervisionada - roda em segundo plano via systemd --user,
+                     # reinicia sozinha se cair ou se o servidor reiniciar
 ```
 
-Na primeira vez, ele builda o frontend automaticamente (pode demorar um pouco) — nas
-próximas, sobe direto. Fica rodando no terminal (não devolve o prompt); `Ctrl+C` pra
-parar. Depois de qualquer mudança no código da interface, rode `vfx-web-build` pra
-gerar uma versão nova antes de ligar de novo.
+Na primeira vez, builda o frontend automaticamente (pode demorar um pouco) — nas
+próximas, sobe direto. Depois de qualquer mudança no código da interface, rode
+`vfx-web-build` pra gerar uma versão nova antes de ligar de novo (nas duas formas).
+
+Com a versão supervisionada: `vfx-web-status` mostra se está rodando, `vfx-web-disable`
+desliga a supervisão. Recomendada se você quer que a interface fique sempre disponível
+sem precisar lembrar de religar depois de um reboot ou de uma queda — a versão em
+primeiro plano é melhor só quando você quer acompanhar o log do processo em tempo real
+enquanto testa alguma coisa.
 
 ### Como acessar
 
@@ -631,6 +649,15 @@ aparelho — celular, notebook — desde que ele também esteja na sua rede Tail
 existe login: a mesma barreira de rede que já protege o ComfyUI e o FaceFusion Gradio
 neste servidor (só quem está na sua tailnet alcança a porta) protege a interface web
 também — decisão deliberada, não uma lacuna esquecida.
+
+**Varredura de segurança (2026-07-03):** a interface passou por uma revisão dedicada de
+segurança, que encontrou e corrigiu uma falha real de leitura arbitrária de arquivo
+(path traversal) e duas falhas menores de validação de entrada — todas confirmadas por
+exploração real contra o servidor e reexploradas depois da correção pra confirmar que
+fecharam. Detalhes técnicos completos no `PROMPT_MASTER.md`. Nenhuma delas dependia de
+autenticação pra ser explorada, então a correção era necessária mesmo com a barreira do
+Tailscale — a rede protege contra estranhos, não contra o que um dispositivo já
+confiável na tailnet poderia fazer sem querer ou por engano.
 
 ### Como os Gates de segurança aparecem aqui
 
@@ -645,9 +672,20 @@ Cada formulário tem uma caixinha **"Modo teste (--dry-run)"** — marque se qui
 validar que os Gates passariam, sem gastar GPU/tempo de verdade (equivalente à flag
 `--dry-run` do terminal).
 
+### Limites de upload e de disco
+
+Antes de aceitar qualquer arquivo enviado pela interface, ela checa duas coisas: se o
+arquivo não passa de 4GB, e se o disco não está abaixo da margem de segurança de 30GB
+(mesma margem do Gate 3) — as duas checagens acontecem *antes* de gastar tempo
+recebendo o arquivo, não depois. Se cair em algum desses casos, aparece uma mensagem de
+erro clara no formulário explicando qual dos dois foi (ver também a seção de
+Troubleshooting do `README.md`).
+
 ### Onde ficam os arquivos
 
 Uploads e resultados da interface web ficam em `/home/ap/ai_pipeline/webui_uploads/` e
 `/home/ap/ai_pipeline/webui_jobs/` (uma pasta por job), separados dos arquivos que você
-gera direto pelo terminal — não se misturam, mas também não são limpos automaticamente;
-de vez em quando vale dar uma olhada e apagar o que não precisa mais.
+gera direto pelo terminal — não se misturam. Pastas de job com mais de 7 dias são
+apagadas automaticamente (junto com o registro do job na memória da interface, que
+também não é mantido pra sempre) — se quiser guardar algum resultado por mais tempo,
+baixe ou copie pra outro lugar antes disso.

@@ -3,8 +3,7 @@ import os
 from fastapi import APIRouter, File, Form, UploadFile
 
 from config import FACEFUSION_DIR, FACEFUSION_PY
-from jobs import job_output_path, job_upload_dir, launch_cmd, new_job
-from routes_faceswap import save_upload
+from jobs import job_upload_dir, launch_cmd, new_job, save_upload, set_output
 
 router = APIRouter()
 
@@ -23,8 +22,7 @@ async def create_dub_job(
 	upload_dir = job_upload_dir(job.id)
 	audio_path = await save_upload(upload_dir, audio)
 	video_path = await save_upload(upload_dir, video)
-	output_path = job_output_path(job.id, "dublado_" + os.path.basename(video_path))
-	job.output_path = output_path
+	output_path = set_output(job, "dublado_" + os.path.basename(video_path))
 
 	if dry_run:
 		# facefusion.py nao tem --dry-run - simulamos so' validando os arquivos e

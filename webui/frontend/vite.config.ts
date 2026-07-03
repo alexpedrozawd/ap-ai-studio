@@ -1,9 +1,15 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.ts',
+  },
   server: {
     // Dev only (npm run dev): repassa /api pro backend FastAPI rodando em 8299,
     // pra nao precisar de CORS durante o desenvolvimento.

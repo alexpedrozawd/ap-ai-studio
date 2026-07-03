@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Form
 
-from jobs import job_output_path, launch, new_job
+from jobs import finish, new_job, set_output
 
 router = APIRouter()
 
@@ -14,13 +14,9 @@ async def create_music_job(
 	dry_run: bool = Form(False),
 ):
 	job = new_job("music")
-	output_path = job_output_path(job.id, "musica_gerada.wav")
-	job.output_path = output_path
+	output_path = set_output(job, "musica_gerada.wav")
 
 	extra_args = ["--prompt", prompt, "--output", output_path]
 	if duration:
 		extra_args += ["--music-duration", str(duration)]
-	if dry_run:
-		extra_args += ["--dry-run"]
-	launch(job, extra_args)
-	return {"job_id": job.id}
+	return finish(job, extra_args, dry_run)
