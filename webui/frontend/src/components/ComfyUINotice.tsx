@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Alert, Button } from "react-bootstrap";
 import { getStatus, startComfyUI } from "../api";
 
-// Aviso reutilizavel pras paginas que exigem o ComfyUI ja ligado (Editar Imagem,
-// Musica) - o modo video liga sozinho, mas esses dois nao (ver MANUAL_USO.md secao 2.2).
+// Aviso reutilizavel pras paginas que usam o ComfyUI (Editar Imagem, Musica, Upscale) -
+// achado de auditoria: video/inpaint/music/upscale ja ligam/religam o ComfyUI sozinhos,
+// dentro da jaula de memoria (ver MANUAL_USO.md secao 2.2) - este aviso e' so'
+// informativo (avisa que vai demorar mais na primeira chamada), nao bloqueia o envio.
 export default function ComfyUINotice() {
   const [up, setUp] = useState<boolean | null>(null);
   const [starting, setStarting] = useState(false);
@@ -37,7 +39,8 @@ export default function ComfyUINotice() {
 
   return (
     <Alert variant="warning" className="d-flex justify-content-between align-items-center">
-      <span>Este modo precisa do ComfyUI ligado.</span>
+      <span>ComfyUI está desligado agora - este modo religa ele sozinho ao clicar em
+      "Iniciar" (pode levar um minuto a mais), ou você pode ligar antes se preferir:</span>
       <Button size="sm" onClick={handleStart} disabled={starting}>
         {starting ? "Ligando..." : "Ligar ComfyUI"}
       </Button>

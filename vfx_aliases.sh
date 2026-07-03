@@ -32,18 +32,6 @@ _vfx_comfyui_up() {
 	curl -s -o /dev/null -m 2 "http://${COMFYUI_HOST}:${COMFYUI_PORT}/system_stats"
 }
 
-_vfx_ensure_comfyui() {
-	if _vfx_comfyui_up; then
-		return 0
-	fi
-	echo "ComfyUI nao esta respondendo em ${COMFYUI_HOST}:${COMFYUI_PORT}."
-	read -r -p "Ligar agora? [Y/n] " resp
-	case "$resp" in
-		[nN]*) echo "Cancelado - ligue manualmente com 'vfx-ligar' quando quiser."; return 1 ;;
-		*) vfx-ligar ;;
-	esac
-}
-
 # --- controle do ComfyUI ---
 
 vfx-ligar() {
@@ -107,7 +95,6 @@ vfx-anima() {
 
 vfx-editar() {
 	if [ "$#" -lt 3 ]; then echo "uso: vfx-editar <foto.jpg> <mascara.png> <saida> [--prompt \"...\"] [outras flags]"; return 1; fi
-	_vfx_ensure_comfyui || return 1
 	local foto="$1" mascara="$2" saida="$3"; shift 3
 	"$VFX_PY" "$VFX_SCRIPT" --mode inpaint --source-image "$foto" --mask-image "$mascara" --output "$saida" "$@"
 }
@@ -116,6 +103,12 @@ vfx-semfundo() {
 	if [ "$#" -lt 2 ]; then echo "uso: vfx-semfundo <foto_ou_video> <saida> [outras flags]"; return 1; fi
 	local alvo="$1" saida="$2"; shift 2
 	"$VFX_PY" "$VFX_SCRIPT" --mode removebg --target "$alvo" --output "$saida" "$@"
+}
+
+vfx-upscale() {
+	if [ "$#" -lt 2 ]; then echo "uso: vfx-upscale <foto_ou_video> <saida> [--fps N] [outras flags]"; return 1; fi
+	local alvo="$1" saida="$2"; shift 2
+	"$VFX_PY" "$VFX_SCRIPT" --mode upscale --target "$alvo" --output "$saida" "$@"
 }
 
 vfx-fala() {
@@ -154,7 +147,6 @@ vfx-limpar() {
 
 vfx-musica() {
 	if [ "$#" -lt 2 ]; then echo "uso: vfx-musica \"<prompt>\" <saida.wav> [--music-duration N] [outras flags]"; return 1; fi
-	_vfx_ensure_comfyui || return 1
 	local prompt="$1" saida="$2"; shift 2
 	"$VFX_PY" "$VFX_SCRIPT" --mode music --prompt "$prompt" --output "$saida" "$@"
 }
@@ -181,11 +173,12 @@ vfx-web() {
 
 # --- supervisao via systemd --user (achado de auditoria: sem isso, um crash ou reboot
 # exigia entrar via SSH e rodar 'vfx-web' na mao de novo). So' cobre a webui - o ComfyUI
-# de proposito NAO ganha essa supervisao: o modo video (run_vfx.py) mata e religa o
-# ComfyUI dentro da propria jaula de memoria sempre que roda (ensure_comfyui_running_
-# under_jail), e um servico systemd com Restart=on-failure brigaria com isso (o systemd
-# tentaria religar o processo "solto" bem na hora que o run_vfx.py acabou de religar
-# ele "preso"). Pra ComfyUI, o botao Ligar/vfx-ligar continua sendo o jeito certo.
+# de proposito NAO ganha essa supervisao: os modos video/inpaint/music/upscale
+# (run_vfx.py) matam e religam o ComfyUI dentro da propria jaula de memoria sempre que
+# rodam (ensure_comfyui_running_under_jail), e um servico systemd com Restart=on-failure
+# brigaria com isso (o systemd tentaria religar o processo "solto" bem na hora que o
+# run_vfx.py acabou de religar ele "preso"). Pra ligar manualmente sem passar por nenhum
+# desses modos, o botao Ligar da webui/vfx-ligar continua disponivel.
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 WEBUI_SERVICE_NAME="vfx-webui.service"
 WEBUI_SERVICE_SRC="$WEBUI_DIR/vfx-webui.service"
@@ -217,7 +210,7 @@ vfx-ajuda() {
 AP AI Studio - atalhos disponiveis (padrao: nome curto + argumentos obrigatorios)
 
   vfx-status                                       ve se o ComfyUI esta ligado, VRAM e disco livres
-  vfx-ligar                                         liga o ComfyUI (necessario p/ vfx-editar e vfx-musica)
+  vfx-ligar                                         liga o ComfyUI manualmente (opcional - vfx-editar/musica/upscale/video ligam sozinhos se precisar)
   vfx-parar                                         desliga o ComfyUI
 
   vfx-web                                           liga a interface web em primeiro plano (Ctrl+C para parar)
@@ -231,6 +224,7 @@ AP AI Studio - atalhos disponiveis (padrao: nome curto + argumentos obrigatorios
   vfx-anima <foto> "<prompt>"                       anima uma foto existente (imagem -> video)
   vfx-editar <foto> <mascara> <saida>               edita/apaga algo de uma foto (inpainting) - some --prompt "..."
   vfx-semfundo <alvo> <saida>                       remove o fundo de uma foto/video
+  vfx-upscale <foto_ou_video> <saida>               aumenta a resolucao 4x de uma foto/video ja pronto
   vfx-fala "<texto>" <voz> <saida.wav>              gera fala com uma voz pronta do XTTS-v2
   vfx-clonar "<texto>" <amostra.wav> <saida.wav>    clona uma voz a partir de uma amostra de audio
   vfx-dublar <audio.wav> <video.mp4> <saida.mp4>    sincroniza a boca do video com um audio novo (dublagem)

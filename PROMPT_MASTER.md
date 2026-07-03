@@ -626,6 +626,34 @@ profissional, cada uma com nota própria — e correções aplicadas em seguida:
     vivo, pela webui real (não simulação) — confirmado por captura de tela. Essa é a
     diferença entre "o regex bate com o texto que eu acho que vai aparecer" e "o
     regex bate com o texto que apareceu de verdade numa falha genuína".
+19. **`MANUAL_USO.md` estava desatualizado em 6 pontos, achado ao responder "está tudo
+    atualizado?"** — todos causados pela própria correção da jaula de memória (achado
+    #16): a seção 1 dizia "4 ambientes Conda" (faltava o `webui-pipeline`, são 5); a
+    seção 2.2 dizia que `inpaint`/`music` só esperavam o ComfyUI responder (sem ligar
+    sozinhos) e nem citava `upscale`; as seções 4.6/4.11/4.13 diziam "pré-requisito:
+    ComfyUI precisa estar rodando"; a seção 7 (cheat sheet) tinha a mesma anotação
+    errada; a seção 9 dizia "só o modo `video` mata e religa o ComfyUI"; a seção 11
+    dizia que Editar Imagem/Música "continuam exigindo" o ComfyUI ligado. Todos
+    corrigidos, e a correção foi **verificada ao vivo de novo** (parei o ComfyUI,
+    rodei `--mode music`, ele religou sozinho do zero — bate com o texto corrigido).
+    O próprio componente `ComfyUINotice.tsx` da webui tinha o mesmo texto/comentário
+    desatualizado ("este modo precisa do ComfyUI ligado") — corrigido junto.
+
+    **Dois achados adicionais de código, corrigidos em seguida:**
+    - `--mode upscale` nunca tinha ganhado um atalho de terminal (`vfx-upscale`),
+      diferente de todos os outros modos — adicionado em `vfx_aliases.sh`, seguindo o
+      padrão de `vfx-semfundo`. Testado ao vivo: `vfx-upscale foto.jpg saida.jpg`
+      rodou de ponta a ponta, reaproveitando o scope já jailado, resultado 64×64 →
+      256×256 (4x confirmado).
+    - `vfx-editar`/`vfx-musica` ainda tinham uma checagem redundante
+      (`_vfx_ensure_comfyui`, um prompt `[Y/n]` no bash) que ligava o ComfyUI **sem
+      jaula** antes de chamar o Python — que aí detectava a falta de jaula e matava/
+      religava tudo de novo, **presa**, gastando ~5-10s à toa. Removida (junto com a
+      função `_vfx_ensure_comfyui`, que ficou sem nenhum outro uso) — o Python já
+      resolve isso sozinho e silenciosamente, mesmo comportamento de `vfx-video`/
+      `vfx-anima` (que nunca tiveram essa pergunta extra). Testado ao vivo: `vfx-editar`
+      com o ComfyUI já ligado rodou direto, sem nenhuma pergunta a mais do bash (só o
+      Gate 3, que é sempre obrigatório).
 
 **Nota registrada, não uma ação (achado do perfil SO/DevOps + uso profissional):** o
 teto de `MAX_VIDEO_WIDTH`/`MAX_VIDEO_HEIGHT` = 720×720 em `vfx_config.py` existe porque
@@ -706,12 +734,8 @@ achado de auditoria) cobre todo o Python do projeto (`run_vfx.py` + 7 módulos `
 achou e corrigiu 4 pontos de `Optional` não comprovado em tempo de execução
 (`vfx_ffmpeg.py`, `webui/backend/jobs.py`, `webui/backend/routes_jobs.py`).
 
-*Estado do repositório:* as correções da auditoria de sistema e da varredura de
-segurança (2026-07-02/03 — supervisão systemd, limites de upload/disco, limpeza
-automática, refactor das rotas, testes novos, e as 3 falhas de segurança corrigidas)
-ainda **não foram commitadas** (`git diff origin/main` não está vazio em 2026-07-03) —
-combinado com o usuário: só commitar quando ele confirmar que está tudo certo. O
-`origin/main` continua no commit `35dc3d0` (Fases 0-11 completas, sem os achados desta
-rodada).
+*Estado do repositório:* commitado e enviado (`origin/main`) em 3 commits desta sessão
+(`0ccf2b0`, `e4aa067`, e o próximo com os achados #19 acima) — sempre com autorização
+explícita do usuário antes de cada `git push`, nunca por conta própria.
 
 [FIM DO PROMPT - ARQUITETURA FAIL-SAFE]

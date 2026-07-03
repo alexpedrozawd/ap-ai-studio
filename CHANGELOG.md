@@ -7,10 +7,27 @@ detalhe no [`PROMPT_MASTER.md`](PROMPT_MASTER.md), que este changelog não subst
 
 ## [Não lançado]
 
-Trabalho já feito nesta sessão, ainda não commitado (aguardando confirmação do
-usuário, conforme combinado).
+Trabalho feito nesta sessão. Parte já commitada e enviada (`0ccf2b0`, `e4aa067`,
+`7db6b99` em `origin/main`); o restante segue aguardando confirmação do usuário antes
+de cada novo commit/push, conforme combinado.
 
 ### Corrigido
+- **`MANUAL_USO.md` desatualizado em 6 pontos** (todos causados pela correção da jaula
+  de memória, achado abaixo): contagem de ambientes Conda (4→5, faltava
+  `webui-pipeline`), a tabela da seção 2.2, os "pré-requisitos" das seções 4.6/4.11/
+  4.13, a tabela da seção 7, a nota da seção 9 e a descrição da seção 11 — todos
+  diziam que `inpaint`/`music`/`upscale` precisavam do ComfyUI já ligado manualmente,
+  o que não é mais verdade. `ComfyUINotice.tsx` tinha o mesmo texto desatualizado,
+  corrigido junto. Verificado ao vivo de novo após a correção (parei o ComfyUI, rodei
+  `--mode music`, religou sozinho).
+- **`--mode upscale` sem atalho de terminal** — todos os outros modos têm um
+  `vfx-*` correspondente, `upscale` tinha ficado de fora. Adicionado `vfx-upscale`
+  em `vfx_aliases.sh`, testado ao vivo (64×64 → 256×256, 4x confirmado).
+- **`vfx-editar`/`vfx-musica` tinham uma checagem redundante** (`_vfx_ensure_comfyui`)
+  que ligava o ComfyUI sem jaula antes de chamar o Python, que aí detectava e
+  religava tudo de novo, preso — ~5-10s desperdiçados. Removida (a função ficou sem
+  nenhum outro uso, removida também); agora esses atalhos rodam igual a
+  `vfx-video`/`vfx-anima`, sem pergunta extra do bash.
 - **Gate 1 (jaula de memória) não era aplicado ao ComfyUI nos modos `inpaint`, `music`
   e `upscale`** — achado real de auditoria final: só o modo `video` chamava
   `ensure_comfyui_running_under_jail()`; os outros 3 só chamavam
