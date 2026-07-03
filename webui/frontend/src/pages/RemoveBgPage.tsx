@@ -102,8 +102,20 @@ export default function RemoveBgPage() {
         <BatchJobQueue
           files={batchFiles}
           createJob={(file) => createRemoveBgJob({ target: file, dryRun })}
-          isVideo={isVideoFile}
-          jobOutputUrl={jobOutputUrl}
+          renderResult={(file, job) =>
+            job.output_ready && (
+              <Card className="mt-2">
+                <Card.Body>
+                  <BeforeAfterCompare originalFile={file} resultUrl={jobOutputUrl(job.id)} isVideo={isVideoFile(file)} />
+                  <div className="mt-2">
+                    <a href={jobOutputUrl(job.id)} download className="btn btn-outline-secondary btn-sm">
+                      Baixar
+                    </a>
+                  </div>
+                </Card.Body>
+              </Card>
+            )
+          }
         />
       ) : (
         <>

@@ -11,6 +11,17 @@ Trabalho já feito nesta sessão, ainda não commitado (aguardando confirmação
 usuário, conforme combinado).
 
 ### Corrigido
+- **Gate 1 (jaula de memória) não era aplicado ao ComfyUI nos modos `inpaint`, `music`
+  e `upscale`** — achado real de auditoria final: só o modo `video` chamava
+  `ensure_comfyui_running_under_jail()`; os outros 3 só chamavam
+  `poll_comfyui_system_stats()` (que so' espera o ComfyUI responder, sem garantir
+  nenhuma jaula). Se o ComfyUI tivesse sido ligado pela webui (`POST
+  /api/comfyui/start`, subprocesso sem jaula), esses 3 modos rodavam sem proteção
+  nenhuma contra OOM no servidor inteiro. Confirmado ao vivo antes da correção
+  (`systemctl status` mostrava o ComfyUI aninhado no cgroup do `vfx-webui.service`, não
+  num scope próprio) e depois (religado sozinho em `vfx-comfyui-video.scope` com
+  `MemoryMax` real aplicado, na primeira chamada de `--mode upscale`). 3 testes novos
+  confirmando que os 3 modos chamam a jaula, não só o poll.
 - **Job "fantasma"** em uploads de múltiplos arquivos (`faceswap`, `inpaint`, `master`,
   `dub`) e de arquivo único (`tts`, `denoise`, `removebg`, `video`): se um upload
   falhasse depois de outro já ter sido salvo, o job ficava preso em `queued` pra
@@ -89,6 +100,12 @@ usuário, conforme combinado).
   simples em português, mostrada acima do log técnico (que continua visível por
   completo) quando um job termina com erro. Achado de auditoria (perfil de uso
   profissional/iniciante).
+- **`friendlyErrors.ts` estendido pras outras funções do pipeline** — antes só cobria
+  cenários ligados ao ComfyUI/Gates; agora também reconhece falha do FaceFusion (troca
+  de rosto), remoção de fundo, TTS, Demucs (limpar áudio), FFmpeg (masterização) e
+  modelo/arquivo ausente (`FileNotFoundError` de `.safetensors`/`.pth`/etc.). Padrões
+  baseados no formato exato dos logs reais (`"{ferramenta} falhou (codigo N): ..."`,
+  confirmado via grep no `run_vfx.py`), não inventados. 7 testes novos.
 - **Processamento em lote** (`BatchJobQueue.tsx`) nas páginas "Aumentar Resolução" e
   "Remover Fundo" — selecionar mais de um arquivo no mesmo campo processa em fila
   sequencial (não paralelo, de propósito: a GPU é compartilhada com o Ollama e não há
@@ -97,6 +114,13 @@ usuário, conforme combinado).
   lote só ativa quando mais de um arquivo é selecionado). Achado de auditoria (perfil
   de uso profissional) — testado ao vivo com 2 arquivos reais pela webui em produção,
   confirmado que o 2º job só começa depois do 1º terminar.
+- **Processamento em lote estendido** pra "Trocar Rosto" (mesma foto de origem, vários
+  alvos) e "Limpar Áudio" (vários áudios, com o mesmo player/download de voz isolada +
+  resto opcional). `BatchJobQueue.tsx` generalizado: em vez de assumir sempre imagem/
+  vídeo com antes-depois, agora recebe uma função `renderResult` de cada página — o
+  componente só cuida da fila, cada página decide como mostrar seu próprio resultado
+  (antes/depois de imagem, player de áudio, etc.). Verificado ao vivo: 2 jobs reais de
+  Trocar Rosto com a mesma origem e alvos diferentes, sequenciais, ambos concluídos.
 - `--blocks-to-swap` (avançado, opcional) no modo `video` — permite acelerar o render
   reduzindo o padrão (`20`) por sua conta e risco. Medido ao vivo: `5` rende ~33-38%
   mais rápido e é seguro até ~80 quadros em 480×480, mas travou o ComfyUI com OOM real

@@ -7,6 +7,8 @@ function file(name: string) {
   return new File(["conteudo"], name, { type: "image/jpeg" });
 }
 
+const renderResult = () => <span>resultado renderizado</span>;
+
 describe("BatchJobQueue", () => {
   it("processa os arquivos em fila, um de cada vez (nao dispara o 2o job antes do 1o terminar)", async () => {
     const createJob = vi.fn().mockResolvedValueOnce({ job_id: "job1" }).mockResolvedValueOnce({ job_id: "job2" });
@@ -21,14 +23,7 @@ describe("BatchJobQueue", () => {
       secondary_output_ready: false,
     });
 
-    render(
-      <BatchJobQueue
-        files={[file("a.jpg"), file("b.jpg")]}
-        createJob={createJob}
-        isVideo={() => false}
-        jobOutputUrl={(id) => `/api/jobs/${id}/output`}
-      />,
-    );
+    render(<BatchJobQueue files={[file("a.jpg"), file("b.jpg")]} createJob={createJob} renderResult={renderResult} />);
 
     await waitFor(() => expect(createJob).toHaveBeenCalledTimes(1));
     expect(createJob).toHaveBeenCalledWith(expect.objectContaining({ name: "a.jpg" }));
@@ -50,14 +45,7 @@ describe("BatchJobQueue", () => {
       secondary_output_ready: false,
     });
 
-    render(
-      <BatchJobQueue
-        files={[file("a.jpg"), file("b.jpg")]}
-        createJob={createJob}
-        isVideo={() => false}
-        jobOutputUrl={(id) => `/api/jobs/${id}/output`}
-      />,
-    );
+    render(<BatchJobQueue files={[file("a.jpg"), file("b.jpg")]} createJob={createJob} renderResult={renderResult} />);
 
     expect(await screen.findByText("na fila")).toBeInTheDocument();
   });
@@ -65,16 +53,31 @@ describe("BatchJobQueue", () => {
   it("continua a fila mesmo se um arquivo falhar ao criar o job", async () => {
     const createJob = vi.fn().mockRejectedValueOnce(new Error("400: tipo invalido")).mockResolvedValueOnce({ job_id: "job2" });
 
-    render(
-      <BatchJobQueue
-        files={[file("ruim.txt"), file("b.jpg")]}
-        createJob={createJob}
-        isVideo={() => false}
-        jobOutputUrl={(id) => `/api/jobs/${id}/output`}
-      />,
-    );
+    render(<BatchJobQueue files={[file("ruim.txt"), file("b.jpg")]} createJob={createJob} renderResult={renderResult} />);
 
     expect(await screen.findByText(/tipo invalido/i)).toBeInTheDocument();
     await waitFor(() => expect(createJob).toHaveBeenCalledTimes(2));
+  });
+
+  it("chama renderResult com o arquivo e o job concluido quando o status e' done", async () => {
+    const createJob = vi.fn().mockResolvedValue({ job_id: "job1" });
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: "job1",
+      mode: "upscale",
+      status: "done",
+      returncode: 0,
+      log_tail: [],
+      output_ready: true,
+      secondary_output_ready: false,
+    });
+
+    const spyRenderResult = vi.fn(() => <span>customizado</span>);
+    render(<BatchJobQueue files={[file("a.jpg")]} createJob={createJob} renderResult={spyRenderResult} />);
+
+    expect(await screen.findByText("customizado")).toBeInTheDocument();
+    expect(spyRenderResult).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "a.jpg" }),
+      expect.objectContaining({ status: "done" }),
+    );
   });
 });

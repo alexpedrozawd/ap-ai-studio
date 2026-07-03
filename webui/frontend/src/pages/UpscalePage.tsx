@@ -124,9 +124,25 @@ export default function UpscalePage() {
         <BatchJobQueue
           files={batchFiles}
           createJob={(file) => createUpscaleJob({ target: file, fps: fps ? Number(fps) : undefined, dryRun })}
-          isVideo={isVideoFile}
-          jobOutputUrl={jobOutputUrl}
-          resultLabel="Depois (4x)"
+          renderResult={(file, job) =>
+            job.output_ready && (
+              <Card className="mt-2">
+                <Card.Body>
+                  <BeforeAfterCompare
+                    originalFile={file}
+                    resultUrl={jobOutputUrl(job.id)}
+                    isVideo={isVideoFile(file)}
+                    afterLabel="Depois (4x)"
+                  />
+                  <div className="mt-2">
+                    <a href={jobOutputUrl(job.id)} download className="btn btn-outline-secondary btn-sm">
+                      Baixar
+                    </a>
+                  </div>
+                </Card.Body>
+              </Card>
+            )
+          }
         />
       ) : (
         <>

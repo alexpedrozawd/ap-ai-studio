@@ -685,6 +685,13 @@ atalhos `vfx-*` da seção 10 disparariam (com uma exceção: dublagem, ver abai
   também baixar o "resto" separado), Música (4.11).
 - **Masterizar**: junta áudio/legendas originais com o vídeo processado (4.12).
 
+**Processamento em lote:** nas páginas Trocar Rosto, Remover Fundo, Aumentar Resolução
+e Limpar Áudio, selecionar mais de um arquivo no campo de upload (Ctrl/Shift + clique)
+entra em modo lote automaticamente — os arquivos são processados em fila, um de cada
+vez (não em paralelo, pra não disputar VRAM), cada um com seu próprio status/log/
+resultado. Em Trocar Rosto, a foto de origem (rosto) fica fixa e só o alvo varia por
+item do lote.
+
 **Particularidade da Dublagem:** assim como no terminal (seção 4.9), esse modo não passa
 pelo `run_vfx.py` — a interface chama o FaceFusion diretamente. Por isso o "Modo teste"
 dessa página não é um `--dry-run` de verdade (o `facefusion.py` não tem essa flag) — ele

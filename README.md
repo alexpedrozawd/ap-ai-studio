@@ -85,22 +85,25 @@ vivo. Ver [seção 3 do MANUAL_USO.md](MANUAL_USO.md) para o detalhe de cada Gat
 - `vfx_aliases.sh`: atalhos de terminal (`vfx-rosto`, `vfx-video`, `vfx-ajuda` etc.), carregados automaticamente via `~/.bashrc` — ver seção 10 do `MANUAL_USO.md`.
 - `requirements/`: dependências reprodutíveis (`pip freeze`) de cada ambiente Conda — ver `requirements/README.md` pra recriar qualquer um do zero. `CHANGELOG.md`: histórico de mudanças por data/versão. `LICENSE`: uso privado, todos os direitos reservados.
 - `.github/workflows/test.yml`: CI no GitHub Actions. Roda de verdade (e tem que passar) o frontend inteiro e os testes dos scripts standalone — são portáveis. O resto de `test_run_vfx.py` roda como "melhor esforço" (pode falhar em runner sem GPU/ambientes Conda deste servidor — comentário no próprio arquivo explica por quê). `.pre-commit-config.yaml`: `ruff`/`eslint` só de lint (detecção de erro, sem reformatar) antes de cada commit — `pre-commit install` uma vez pra ativar.
-- `run_vfx.py`: orquestrador principal (`orchestrate()`/`build_parser()`/`main()`) — 405 linhas, dividido em módulos por responsabilidade: `vfx_config.py` (constantes), `vfx_core.py` (validação/logging/confirm), `vfx_gates.py` (os 3 Gates de segurança), `vfx_comfyui.py` (comunicação com o ComfyUI), `vfx_workflows.py` (construtores de workflow, incluindo `--mode upscale`), `vfx_facefusion.py` (comandos externos), `vfx_ffmpeg.py` (FFmpeg/EXIF/chunking). `test_run_vfx.py` testa tudo isso via `run_vfx.py` (68 testes). `--mode upscale` amplia 4x uma foto/vídeo pronto (Real-ESRGAN, standalone, sem gerar nada novo) — ver seção 12 do `MANUAL_USO.md`.
+- `run_vfx.py`: orquestrador principal (`orchestrate()`/`build_parser()`/`main()`) — 466 linhas, dividido em módulos por responsabilidade: `vfx_config.py` (constantes), `vfx_core.py` (validação/logging/confirm), `vfx_gates.py` (os 3 Gates de segurança), `vfx_comfyui.py` (comunicação com o ComfyUI), `vfx_workflows.py` (construtores de workflow, incluindo `--mode upscale`), `vfx_facefusion.py` (comandos externos), `vfx_ffmpeg.py` (FFmpeg/EXIF/chunking). `test_run_vfx.py` testa tudo isso via `run_vfx.py` (77 testes). `--mode upscale` amplia 4x uma foto/vídeo pronto (Real-ESRGAN, standalone, sem gerar nada novo) — ver seção 4.13 do `MANUAL_USO.md`. ControlNet Depth opcional no `--mode inpaint` (`--use-depth-controlnet`) e `--blocks-to-swap` avançado no `--mode video`.
 - `tts_synthesize.py` / `demucs_separate.py`: scripts standalone chamados pelo `run_vfx.py` (modos `tts` e `denoise`), cada um no seu próprio ambiente Conda. `test_standalone_scripts.py` testa os dois via subprocesso real (6 testes).
 - `webui/`: interface web (FastAPI + React/TypeScript/Tailwind/Bootstrap), acessível via
   Tailscale em `http://100.122.206.41:8299` — **rodando agora, supervisionada pelo
   `systemd --user`** (`vfx-web-enable`, ativado em 2026-07-03; `vfx-web-status` mostra o
   estado). Todas as 11 funções do `run_vfx.py` (Fases A+B + upscale) — ver seção 11 do `MANUAL_USO.md`.
-  `webui/backend/` (env Conda `webui-pipeline`, 43 testes em `test_backend.py`) chama
+  `webui/backend/` (env Conda `webui-pipeline`, 44 testes em `test_backend.py`) chama
   `run_vfx.py` como subprocesso, mesma lógica dos atalhos `vfx-*` — não duplica a
   lógica dos Gates (exceção: dublagem chama o FaceFusion direto, igual ao atalho
   `vfx-dublar`). Também limita tamanho de upload (checado de verdade nos bytes
   gravados, não só no cabeçalho declarado) e checa espaço em disco antes de aceitar
   qualquer arquivo, e limpa jobs/uploads com mais de 7 dias automaticamente
-  (`jobs.py:cleanup_old_jobs`). `webui/frontend/` (Vite, 7 testes via Vitest):
+  (`jobs.py:cleanup_old_jobs`). `webui/frontend/` (Vite, 48 testes via Vitest,
+  incluindo processamento em lote em 3 páginas e mensagens de erro amigáveis):
   `npm run build`/`vfx-web-build` gera `webui/backend/static/`. `webui/vfx-webui.service`:
   unidade `systemd --user` que supervisiona a interface web (ativa, `vfx-web-status`
-  mostra o estado; `vfx-web-disable` desliga).
+  mostra o estado; `vfx-web-disable` desliga). `webui/frontend/e2e/`: verificação
+  visual manual com Chrome headless (fora do CI, ferramenta pra rodar quando quiser
+  confirmar visualmente uma mudança de UI).
 
 ## Segurança
 
