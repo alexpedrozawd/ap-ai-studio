@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Alert, Button, Card, Col, Form, Row } from "react-bootstrap";
 import { createInpaintJob, jobOutputUrl } from "../api";
 import type { JobStatusResponse } from "../api";
+import BeforeAfterCompare from "../components/BeforeAfterCompare";
 import ComfyUINotice from "../components/ComfyUINotice";
 import JobLogPanel from "../components/JobLogPanel";
 
@@ -10,6 +11,8 @@ export default function InpaintPage() {
   const [sourceImage, setSourceImage] = useState<File | null>(null);
   const [maskImage, setMaskImage] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [useDepthControlnet, setUseDepthControlnet] = useState(false);
+  const [controlnetStrength, setControlnetStrength] = useState("0.6");
   const [dryRun, setDryRun] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [finishedJob, setFinishedJob] = useState<JobStatusResponse | null>(null);
@@ -26,7 +29,14 @@ export default function InpaintPage() {
     setSubmitting(true);
     setFinishedJob(null);
     try {
-      const resp = await createInpaintJob({ sourceImage, maskImage, prompt: prompt || undefined, dryRun });
+      const resp = await createInpaintJob({
+        sourceImage,
+        maskImage,
+        prompt: prompt || undefined,
+        useDepthControlnet,
+        controlnetStrength: Number(controlnetStrength),
+        dryRun,
+      });
       setJobId(resp.job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -81,6 +91,34 @@ export default function InpaintPage() {
           <Col xs={12}>
             <Form.Check
               type="checkbox"
+              id="useDepthControlnet"
+              label="Avançado: guiar pela profundidade da cena original (ControlNet Depth)"
+              checked={useDepthControlnet}
+              onChange={(e) => setUseDepthControlnet(e.target.checked)}
+            />
+            <Form.Text className="text-muted">
+              Ajuda a manter a composição/perspectiva coerente ao editar - custo extra de
+              VRAM/tempo. Desligado por padrão.
+            </Form.Text>
+          </Col>
+          {useDepthControlnet && (
+            <Col md={4}>
+              <Form.Group controlId="controlnetStrength">
+                <Form.Label>Força do ControlNet (0-1)</Form.Label>
+                <Form.Control
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={controlnetStrength}
+                  onChange={(e) => setControlnetStrength(e.target.value)}
+                />
+              </Form.Group>
+            </Col>
+          )}
+          <Col xs={12}>
+            <Form.Check
+              type="checkbox"
               id="dryRunInpaint"
               label="Modo teste (--dry-run): valida os Gates mas nao processa de verdade"
               checked={dryRun}
@@ -106,7 +144,7 @@ export default function InpaintPage() {
         <Card className="mt-3">
           <Card.Body>
             <Card.Title>Resultado</Card.Title>
-            <img src={jobOutputUrl(finishedJob.id)} alt="resultado" style={{ maxWidth: "100%", maxHeight: 400 }} />
+            <BeforeAfterCompare originalFile={sourceImage} resultUrl={jobOutputUrl(finishedJob.id)} />
             <div className="mt-2">
               <a href={jobOutputUrl(finishedJob.id)} download className="btn btn-outline-secondary btn-sm">
                 Baixar

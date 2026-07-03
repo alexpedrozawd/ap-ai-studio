@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, Form, UploadFile
 
-from jobs import finish, job_output_path, job_upload_dir, new_job, save_upload, set_output
+from jobs import finish, job_output_path, job_upload_dir, new_job, save_uploads, set_output
 
 router = APIRouter()
 
@@ -13,7 +13,8 @@ async def create_denoise_job(
 ):
 	job = new_job("denoise")
 	upload_dir = job_upload_dir(job.id)
-	target_path = await save_upload(upload_dir, target)
+	paths = await save_uploads(job, upload_dir, target=target)
+	target_path = paths["target"]
 	output_path = set_output(job, "voz_isolada.wav")
 
 	extra_args = ["--target", target_path, "--output", output_path]

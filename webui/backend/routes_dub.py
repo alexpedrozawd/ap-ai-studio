@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, File, Form, UploadFile
 
 from config import FACEFUSION_DIR, FACEFUSION_PY
-from jobs import job_upload_dir, launch_cmd, new_job, save_upload, set_output
+from jobs import job_upload_dir, launch_cmd, new_job, save_uploads, set_output
 
 router = APIRouter()
 
@@ -20,8 +20,8 @@ async def create_dub_job(
 	validada (incompatibilidade de driver com essa GPU nessa operacao especifica)."""
 	job = new_job("dublagem")
 	upload_dir = job_upload_dir(job.id)
-	audio_path = await save_upload(upload_dir, audio)
-	video_path = await save_upload(upload_dir, video)
+	paths = await save_uploads(job, upload_dir, audio=audio, video=video)
+	audio_path, video_path = paths["audio"], paths["video"]
 	output_path = set_output(job, "dublado_" + os.path.basename(video_path))
 
 	if dry_run:

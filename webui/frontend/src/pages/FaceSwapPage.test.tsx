@@ -49,4 +49,51 @@ describe("FaceSwapPage", () => {
 
     expect(await screen.findByText("rodando")).toBeInTheDocument();
   });
+
+  it("mostra o antes/depois e o botao de baixar quando o job termina com sucesso", async () => {
+    vi.spyOn(api, "createFaceswapJob").mockResolvedValue({ job_id: "job123" });
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: "job123",
+      mode: "faceswap",
+      status: "done",
+      returncode: 0,
+      log_tail: ["concluido"],
+      output_ready: true,
+      secondary_output_ready: false,
+    });
+
+    render(<FaceSwapPage />);
+
+    const sourceInput = screen.getByLabelText(/foto de origem/i);
+    const targetInput = screen.getByLabelText(/alvo \(foto ou video/i);
+    await userEvent.upload(sourceInput, new File(["a"], "origem.jpg", { type: "image/jpeg" }));
+    await userEvent.upload(targetInput, new File(["b"], "alvo.jpg", { type: "image/jpeg" }));
+    await userEvent.click(screen.getByRole("button", { name: /iniciar/i }));
+
+    expect(await screen.findByText("Resultado")).toBeInTheDocument();
+    expect(screen.getByText("Antes")).toBeInTheDocument();
+    expect(screen.getByText("Depois")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /baixar/i })).toBeInTheDocument();
+  });
+
+  it("mostra alerta de erro quando o job termina com falha", async () => {
+    vi.spyOn(api, "createFaceswapJob").mockResolvedValue({ job_id: "job123" });
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: "job123",
+      mode: "faceswap",
+      status: "error",
+      returncode: 1,
+      log_tail: ["falhou"],
+      output_ready: false,
+      secondary_output_ready: false,
+    });
+
+    render(<FaceSwapPage />);
+
+    await userEvent.upload(screen.getByLabelText(/foto de origem/i), new File(["a"], "origem.jpg", { type: "image/jpeg" }));
+    await userEvent.upload(screen.getByLabelText(/alvo \(foto ou video/i), new File(["b"], "alvo.jpg", { type: "image/jpeg" }));
+    await userEvent.click(screen.getByRole("button", { name: /iniciar/i }));
+
+    expect(await screen.findByText(/o job terminou com erro/i)).toBeInTheDocument();
+  });
 });

@@ -32,7 +32,7 @@ Existem duas formas de usar o pipeline — escolha a que preferir, elas fazem ex
 3. Navegue pelo menu no topo:
    - **Status** — vê se o ComfyUI está ligado, VRAM e disco livres.
    - **Gerar Vídeo** — texto→vídeo ou imagem→vídeo.
-   - **Imagem ▾** — Trocar Rosto, Editar Imagem, Remover Fundo.
+   - **Imagem ▾** — Trocar Rosto, Editar Imagem, Remover Fundo, Aumentar Resolução.
    - **Áudio ▾** — Voz (TTS/clonagem), Dublagem, Limpar Áudio, Música.
    - **Masterizar** — junta áudio/legendas originais com o vídeo processado.
 4. Em qualquer página: preencha o formulário, marque **"Modo teste (--dry-run)"** se
@@ -83,13 +83,15 @@ vivo. Ver [seção 3 do MANUAL_USO.md](MANUAL_USO.md) para o detalhe de cada Gat
 - `PROMPT_MASTER.md`: O "código-fonte" lógico (Prompt Nível 10) que deve ser usado para inicializar a criação ou atualização da infraestrutura do estúdio pela IA.
 - `MANUAL_USO.md`: Manual do usuário passo a passo (didático, para quem nunca usou o pipeline) — como rodar cada função (`--mode`) do `run_vfx.py`: troca de rosto, geração de vídeo, edição de imagem, clonagem de voz, dublagem, remoção de ruído, geração de música e masterização final.
 - `vfx_aliases.sh`: atalhos de terminal (`vfx-rosto`, `vfx-video`, `vfx-ajuda` etc.), carregados automaticamente via `~/.bashrc` — ver seção 10 do `MANUAL_USO.md`.
-- `run_vfx.py` / `test_run_vfx.py`: orquestrador principal e sua suíte de testes (62).
+- `requirements/`: dependências reprodutíveis (`pip freeze`) de cada ambiente Conda — ver `requirements/README.md` pra recriar qualquer um do zero. `CHANGELOG.md`: histórico de mudanças por data/versão. `LICENSE`: uso privado, todos os direitos reservados.
+- `.github/workflows/test.yml`: CI no GitHub Actions. Roda de verdade (e tem que passar) o frontend inteiro e os testes dos scripts standalone — são portáveis. O resto de `test_run_vfx.py` roda como "melhor esforço" (pode falhar em runner sem GPU/ambientes Conda deste servidor — comentário no próprio arquivo explica por quê). `.pre-commit-config.yaml`: `ruff`/`eslint` só de lint (detecção de erro, sem reformatar) antes de cada commit — `pre-commit install` uma vez pra ativar.
+- `run_vfx.py`: orquestrador principal (`orchestrate()`/`build_parser()`/`main()`) — 405 linhas, dividido em módulos por responsabilidade: `vfx_config.py` (constantes), `vfx_core.py` (validação/logging/confirm), `vfx_gates.py` (os 3 Gates de segurança), `vfx_comfyui.py` (comunicação com o ComfyUI), `vfx_workflows.py` (construtores de workflow, incluindo `--mode upscale`), `vfx_facefusion.py` (comandos externos), `vfx_ffmpeg.py` (FFmpeg/EXIF/chunking). `test_run_vfx.py` testa tudo isso via `run_vfx.py` (68 testes). `--mode upscale` amplia 4x uma foto/vídeo pronto (Real-ESRGAN, standalone, sem gerar nada novo) — ver seção 12 do `MANUAL_USO.md`.
 - `tts_synthesize.py` / `demucs_separate.py`: scripts standalone chamados pelo `run_vfx.py` (modos `tts` e `denoise`), cada um no seu próprio ambiente Conda. `test_standalone_scripts.py` testa os dois via subprocesso real (6 testes).
 - `webui/`: interface web (FastAPI + React/TypeScript/Tailwind/Bootstrap), acessível via
   Tailscale em `http://100.122.206.41:8299` — **rodando agora, supervisionada pelo
   `systemd --user`** (`vfx-web-enable`, ativado em 2026-07-03; `vfx-web-status` mostra o
-  estado). Todas as 10 funções do `run_vfx.py` (Fases A+B) — ver seção 11 do `MANUAL_USO.md`.
-  `webui/backend/` (env Conda `webui-pipeline`, 34 testes em `test_backend.py`) chama
+  estado). Todas as 11 funções do `run_vfx.py` (Fases A+B + upscale) — ver seção 11 do `MANUAL_USO.md`.
+  `webui/backend/` (env Conda `webui-pipeline`, 43 testes em `test_backend.py`) chama
   `run_vfx.py` como subprocesso, mesma lógica dos atalhos `vfx-*` — não duplica a
   lógica dos Gates (exceção: dublagem chama o FaceFusion direto, igual ao atalho
   `vfx-dublar`). Também limita tamanho de upload (checado de verdade nos bytes

@@ -2,7 +2,7 @@ import os
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from jobs import finish, job_upload_dir, new_job, save_upload, set_output
+from jobs import finish, job_upload_dir, new_job, save_uploads, set_output
 
 router = APIRouter()
 
@@ -14,7 +14,8 @@ async def create_removebg_job(
 ):
 	job = new_job("removebg")
 	upload_dir = job_upload_dir(job.id)
-	target_path = await save_upload(upload_dir, target)
+	paths = await save_uploads(job, upload_dir, target=target)
+	target_path = paths["target"]
 	base, ext = os.path.splitext(os.path.basename(target_path))
 	# Achado real (QA, job de verdade pela API): o proprio FaceFusion recusa rodar se a
 	# extensao de saida nao for IDENTICA a extensao de entrada (validacao dele mesmo,

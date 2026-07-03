@@ -10,6 +10,7 @@ import DubPage from "./pages/DubPage";
 import DenoisePage from "./pages/DenoisePage";
 import MusicPage from "./pages/MusicPage";
 import MasterPage from "./pages/MasterPage";
+import UpscalePage from "./pages/UpscalePage";
 
 // Fase A: Status + Trocar Rosto + Gerar Video.
 // Fase B: + Editar Imagem, Remover Fundo, Voz, Dublagem, Limpar Audio, Musica,
@@ -40,6 +41,9 @@ export default function App() {
                 </NavDropdown.Item>
                 <NavDropdown.Item as={NavLink} to="/semfundo">
                   Remover Fundo
+                </NavDropdown.Item>
+                <NavDropdown.Item as={NavLink} to="/upscale">
+                  Aumentar Resolução
                 </NavDropdown.Item>
               </NavDropdown>
 
@@ -73,6 +77,7 @@ export default function App() {
           <Route path="/video" element={<VideoPage />} />
           <Route path="/editar" element={<InpaintPage />} />
           <Route path="/semfundo" element={<RemoveBgPage />} />
+          <Route path="/upscale" element={<UpscalePage />} />
           <Route path="/voz" element={<VoicePage />} />
           <Route path="/dublar" element={<DubPage />} />
           <Route path="/limpar" element={<DenoisePage />} />

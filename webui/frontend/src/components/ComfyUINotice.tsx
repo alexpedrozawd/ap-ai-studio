@@ -21,7 +21,6 @@ export default function ComfyUINotice() {
     check();
     const interval = setInterval(check, 5000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (up !== false) return null;

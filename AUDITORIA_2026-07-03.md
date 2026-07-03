@@ -4,9 +4,14 @@
 **Escopo:** documentação, arquitetura de pastas, código, funcionalidades, estabilidade, segurança
 **Método:** leitura de código, execução real da suíte de testes, exploração ao vivo contra o servidor rodando (não só análise estática), verificação cruzada dos três documentos contra o estado real do sistema
 
+> 🔄 **Nota revisada para 9,0/10 depois de correções aplicadas no mesmo dia** — ver
+> ["Atualização pós-correção"](#atualização-pós-correção-2026-07-03-mesmo-dia) mais
+> abaixo. A nota de 8,5 e os achados originais abaixo ficam mantidos como registro
+> histórico do que foi encontrado nesta auditoria.
+
 ---
 
-## Nota: 8,5 / 10
+## Nota original: 8,5 / 10
 
 Subiu de **7,5** (auditoria anterior, mesmo dia) para **8,5**. A alta não é só "corrigiu a lista de pendências" — é que o processo de auditoria em si se mostrou funcional: uma vulnerabilidade **crítica** de verdade foi encontrada, explorada ao vivo pra confirmar que era real, corrigida, e reexplorada pra confirmar que fechou. Isso é o que um processo de segurança maduro parece fazendo seu trabalho, não um sistema que nunca teve problema. A nota não é 10 porque esta própria auditoria, em poucos minutos de revisão fresca, já encontrou mais um bug real (abaixo) — sinal de que uma revisão ainda mais adversarial (ou tempo maior de exposição) provavelmente encontraria mais.
 
@@ -114,10 +119,61 @@ explicam por que a nota não é 9+.
 
 ## Melhorias sugeridas (para uma próxima rodada, não aplicadas agora)
 
-1. Corrigir o job fantasma em uploads multi-arquivo (rollback do job/arquivos se uma etapa falhar).
-2. `except Exception` mais abrangente em `save_upload()`, com `upload.close()` garantido via `finally`.
-3. Considerar um semáforo simples limitando jobs simultâneos (ex.: 2-3 no máximo) se o uso familiar crescer além de uma pessoa por vez.
-4. Rodar uma ferramenta de SAST (ex.: `bandit` pro Python, `npm audit`/`eslint-plugin-security` pro frontend) como segunda camada de verificação automatizada, complementando a revisão manual.
+1. ~~Corrigir o job fantasma em uploads multi-arquivo (rollback do job/arquivos se uma etapa falhar).~~ **Corrigido, ver atualização abaixo.**
+2. ~~`except Exception` mais abrangente em `save_upload()`, com `upload.close()` garantido via `finally`.~~ **Corrigido, ver atualização abaixo.**
+3. Considerar um semáforo simples limitando jobs simultâneos (ex.: 2-3 no máximo) se o uso familiar crescer além de uma pessoa por vez. **Mantido como está** — o usuário confirmou que é uso individual, um único usuário por vez; sem necessidade real de limitar concorrência agora.
+4. ~~Rodar uma ferramenta de SAST...~~ **Feito, ver atualização abaixo.**
+
+---
+
+## Atualização pós-correção (2026-07-03, mesmo dia)
+
+A pedido do usuário, os itens que rebaixavam a nota foram corrigidos — com exceção
+explícita dos itens 3 e 4 da lista de Contras (sem limite de concorrência — uso é
+individual, confirmado pelo usuário; disco compartilhado — será resolvido na troca do
+SATA, fora do escopo do software). Todas as correções abaixo foram verificadas ao vivo
+contra o servidor rodando (reexploração real, não só leitura de código), com testes de
+regressão novos.
+
+**1. Job fantasma em upload multi-arquivo — corrigido.** Nova função
+`save_uploads()` em `jobs.py`: salva um ou mais arquivos do mesmo job como uma unidade
+só — se qualquer upload falhar (nome inválido, tamanho excedido), desfaz o job inteiro
+(remove de `JOBS`, apaga a pasta de upload) antes de propagar o erro. Aplicada nas 8
+rotas que recebem arquivo, incluindo as de upload único (`tts`, `denoise`, `removebg`,
+`video`), que tinham a mesma classe de problema (job preso em `queued` pra sempre) sem
+o componente de "arquivo órfão". **Reexplorado ao vivo**: o mesmo teste que antes
+deixava uma pasta órfã em `webui_uploads/` (source válido + target com filename `".."`)
+agora não deixa rastro nenhum. 2 testes de regressão novos.
+
+**2. `save_upload()` — cleanup abrangente e `close()` garantido — corrigido.**
+`except HTTPException` virou `except Exception` (cobre qualquer erro de I/O, não só os
+que o próprio código levanta), e `upload.close()` agora roda dentro de um `finally`
+externo, garantido em qualquer caminho (sucesso, validação de nome falhando, limite de
+tamanho excedido, ou erro de disco genérico).
+
+**3. SAST rodado de verdade — feito.** `bandit` (Python) e `npm audit` (frontend).
+Achado real e corrigido: `nvidia-smi` era chamado por caminho parcial (`"nvidia-smi"`,
+dependente do `PATH`) em dois lugares (`run_vfx.py` e `webui/backend/routes_status.py`)
+— trocado pelo caminho absoluto confirmado no servidor (`/usr/bin/nvidia-smi`), fecha a
+possibilidade (de risco baixo, mas real) de um `PATH` manipulado trocar o binário
+executado. Os demais avisos do bandit (import de `subprocess`, "verifique entrada não
+confiável") são falsos positivos genéricos — confirmado que todo uso de `subprocess`
+neste projeto usa lista de argumentos fixos, nunca `shell=True`, nunca entrada do
+usuário direto num comando. `npm audit`: 0 vulnerabilidades nas dependências de
+produção; 4 vulnerabilidades em dependências **só de desenvolvimento** (`vite`/`esbuild`
+do servidor de dev, que nem roda em produção) — corrigir exigiria quebrar a
+compatibilidade com o Node 18 do servidor (decisão já documentada, fora de escopo).
+Avaliado e conscientemente adiado, não ignorado.
+
+**Testes:** 109 → **111** (2 novos de regressão do job fantasma). Todas as 4 suítes
+passando, build de produção limpo, serviço `systemd` reiniciado e reverificado ao vivo
+depois de cada correção.
+
+**Nota revisada: 9,0 / 10.** Sobem os pontos que tinham derrubado a nota (itens 1, 2 e
+5 dos Contras, agora corrigidos ou mitigados). Não é 10 porque os itens 3 e 4 continuam
+como trade-offs conscientes (não bugs, mas limitações reais do momento), e uma
+auditoria de segurança nunca é "definitivamente completa" — é sempre um retrato do que
+foi verificado até agora.
 
 ---
 

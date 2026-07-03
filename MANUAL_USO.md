@@ -14,8 +14,8 @@
 > "por baixo do capô", pra você entender o que cada atalho está fazendo de verdade.
 
 > 🖥️ **Interface web:** se preferir nem usar terminal, existe uma interface gráfica
-> acessível pelo navegador (`vfx-web`) — veja a seção 11. Já cobre as 10 funções do
-> pipeline (Fases A e B completas).
+> acessível pelo navegador (`vfx-web`) — veja a seção 11. Já cobre as 11 funções do
+> pipeline (Fases A e B completas + upscale).
 
 ---
 
@@ -38,6 +38,19 @@ de imagem, clonagem de voz, remoção de ruído e geração de música.
    em vez de deixar o sistema "adivinhar" por filtros).
 
 Tudo o que segue assume essas duas regras como pano de fundo.
+
+**Uma distinção importante de qualidade, pra calibrar expectativa:**
+- **Troca de rosto** (seção 4.1-4.3) é o modo de **produção** do pipeline — a imagem/vídeo
+  original continua com a qualidade original, só o rosto é trocado. É o que dá o
+  resultado final pronto pra assistir com a família.
+- **Geração de vídeo do zero, texto→vídeo ou imagem→vídeo** (seção 4.4/4.5) é modo
+  **rascunho/experimental** — resolução travada em no máximo 720×720, poucos segundos de
+  duração, e o resultado tem qualidade visivelmente inferior a um vídeo de verdade
+  (esperado: é um modelo pequeno, otimizado pra caber nesta GPU, não uma ferramenta de
+  produção final). Útil pra testar ideias e prompts, não pra entregar como resultado
+  definitivo.
+- **Upscale standalone** (seção 4.13, novo) ajuda a compensar isso pra fotos/vídeos já
+  prontos — mas não "conserta" a geração do zero, só amplia resolução do que já existe.
 
 ---
 
@@ -235,6 +248,12 @@ memória).
 
 ### 4.4 Criar um vídeo do zero, só a partir de texto (texto → vídeo)
 
+> ⚠️ **Modo rascunho, não produção** (ver seção 0). Diferente da troca de rosto, aqui
+> você está pedindo pro modelo *inventar* um vídeo do zero — a resolução e a duração são
+> limitadas pela VRAM desta GPU (16GB), e o resultado tem qualidade de teste/rascunho, não
+> de entrega final. Se você quer aumentar a resolução de algo que já existe (uma foto
+> antiga, por exemplo), use o `--mode upscale` da seção 4.13 em vez deste.
+
 Isso **não** usa uma foto de referência — o vídeo é inteiramente gerado a partir da
 descrição que você escrever.
 
@@ -254,6 +273,13 @@ python run_vfx.py --mode video \
   essa duração maior ainda não foi testada de ponta a ponta no momento em que este manual
   foi escrito (só validamos ~10s de verdade); é mais arriscado quanto a travar por falta
   de memória.
+- `--blocks-to-swap` (avançado, opcional): reduz o padrão (`20`) pra acelerar o render,
+  usando mais VRAM de pico. **Testado ao vivo:** `--blocks-to-swap 5` rendeu ~33% mais
+  rápido em testes curtos e ficou seguro até ~80 quadros em 480×480 (~12GB de pico) —
+  mas **travou o ComfyUI com falta de memória de verdade** nos 161 quadros padrão na
+  mesma resolução (precisou religar o ComfyUI depois). Use só em renders curtos e por
+  sua conta e risco; não mude o padrão pra renders no tamanho normal sem testar antes
+  com uma duração pequena primeiro.
 
 O resultado sai automaticamente com interpolação de quadros (fluidez de ~30fps, mesmo o
 modelo gerando a 16fps nativos) e já em resolução ampliada 4x (upscale automático). Ele é
@@ -301,6 +327,30 @@ python run_vfx.py --mode inpaint \
 isso, o resultado tende a ficar estranho e sem relação com o resto da cena (achado real,
 confirmado em teste) — o sistema avisa isso no terminal se você esquecer, mas não bloqueia
 a execução.
+
+**Avançado — `--use-depth-controlnet`:** guia a edição por um mapa de profundidade da
+própria foto original (ControlNet SDXL), além da máscara manual — ajuda a manter a
+composição/perspectiva da cena coerente ao editar (ex.: trocar o fundo mantendo objetos
+em primeiro plano em escala/posição condizentes). Desligado por padrão (custo extra de
+VRAM/tempo, ~25% mais lento em teste real). Use `--controlnet-strength` (padrão `0.6`,
+de 0 a 1) pra ajustar o quanto o resultado deve seguir a profundidade original:
+
+```bash
+python run_vfx.py --mode inpaint \
+  --source-image /home/ap/fotos/foto_original.jpg \
+  --mask-image /home/ap/fotos/mascara.png \
+  --prompt "céu azul com nuvens" \
+  --output /home/ap/ai_pipeline/foto_editada.jpg \
+  --use-depth-controlnet --controlnet-strength 0.6
+```
+
+Também disponível na interface web (checkbox "Avançado" na página "Editar Imagem").
+
+**Qualidade da borda da edição (sempre ativo, sem precisar configurar):** a borda da
+máscara é suavizada e o resultado gerado é colado de volta na foto original (em vez de
+usar a imagem inteira reprocessada) — a área fora da máscara fica idêntica à original,
+sem a leve deriva de cor que existia antes, e a transição fica menos visível. Achado
+real de um teste com ControlNet que mostrou uma linha de costura na borda da edição.
 
 ### 4.7 Remover o fundo de uma foto/vídeo
 
@@ -433,6 +483,33 @@ python run_vfx.py --mode master \
 - `--fps`: taxa de quadros final. Padrão `24` (cinema); use `30` se preferir o padrão TV/
   vídeo online, ou combine com a saída do modo `video` (que já sai a 30fps).
 
+### 4.13 Aumentar a resolução de uma foto ou vídeo já pronto (upscale)
+
+Diferente da seção 4.4/4.5, este modo **não gera nada novo** — ele pega uma foto ou vídeo
+que já existe (ex.: uma foto antiga de família, de baixa resolução) e amplia 4x, usando o
+mesmo modelo Real-ESRGAN que já roda internamente no modo `video`. Serve, por exemplo,
+para restaurar fotos antigas sem precisar recriar a cena do zero.
+
+```bash
+python run_vfx.py --mode upscale \
+  --target /home/ap/fotos/foto_antiga.jpg \
+  --output /home/ap/ai_pipeline/foto_antiga_4x.jpg
+```
+
+Para vídeo, o comando é o mesmo (o sistema detecta automaticamente pela extensão do
+arquivo em `--target`); use `--fps` se quiser fixar a taxa de quadros de saída (o valor
+não é detectado automaticamente do vídeo original):
+
+```bash
+python run_vfx.py --mode upscale \
+  --target /home/ap/videos/cena_curta.mp4 \
+  --output /home/ap/ai_pipeline/cena_curta_4x.mp4 \
+  --fps 24
+```
+
+**Pré-requisito:** o ComfyUI precisa já estar rodando (mesma observação do item 4.6) —
+o upscale usa os mesmos nodes do ComfyUI que a geração de vídeo.
+
 ---
 
 ## 5. Fluxo completo de exemplo (do zero até o vídeo final)
@@ -499,6 +576,7 @@ cd /home/ap/ap-ai-studio
 | Isolar voz / remover ruído | `python run_vfx.py --mode denoise --target A.wav --output O.wav` |
 | Gerar música | `python run_vfx.py --mode music --prompt "..." --music-duration 15 --output O.wav` (ComfyUI precisa estar ligado) |
 | Juntar áudio original + vídeo processado | `python run_vfx.py --mode master --original ORIG.mp4 --processed-video PROC.mp4 --output FINAL.mp4` |
+| Aumentar resolução de foto/vídeo pronto (4x) | `python run_vfx.py --mode upscale --target F.jpg --output O.jpg` (ComfyUI precisa estar ligado) |
 | Testar sem executar nada de verdade | adicione `--dry-run` em qualquer comando acima |
 | Pular confirmações repetidas (exceto disco) | adicione `--auto-approve` |
 
@@ -597,11 +675,11 @@ Tailscale (celular, notebook). Ela é um "controle remoto" visual do mesmo `run_
 por baixo dos panos, cada clique em "Iniciar" dispara exatamente o mesmo comando que os
 atalhos `vfx-*` da seção 10 disparariam (com uma exceção: dublagem, ver abaixo).
 
-**Todas as 10 funções já estão na interface:**
+**Todas as 11 funções já estão na interface:**
 - **Status**: ComfyUI (Ligar/Parar), VRAM livre, espaço em disco — atualiza sozinho.
 - **Gerar Vídeo**: texto→vídeo e imagem→vídeo (seções 4.4/4.5) numa página só.
 - **Menu "Imagem"**: Trocar Rosto (4.1-4.3), Editar Imagem/inpainting (4.6), Remover
-  Fundo (4.7).
+  Fundo (4.7), Aumentar Resolução/upscale (4.13).
 - **Menu "Áudio"**: Voz/TTS e clonagem (4.8, com um seletor pra escolher entre voz
   pronta ou amostra), Dublagem (4.9), Limpar Áudio/isolar voz (4.10, com opção de
   também baixar o "resto" separado), Música (4.11).

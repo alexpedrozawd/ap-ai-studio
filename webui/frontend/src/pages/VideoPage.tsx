@@ -52,6 +52,14 @@ export default function VideoPage() {
         sozinho se precisar - pode levar alguns minutos.
       </p>
 
+      <Alert variant="warning">
+        <strong>Modo rascunho, não produção.</strong> Resolução limitada a 720×720 e poucos
+        segundos de duração (limite de VRAM desta GPU) - a qualidade é de teste/rascunho,
+        não um resultado final pronto para assistir. Para trocar o rosto em uma cena já
+        existente com qualidade de produção, use "Trocar Rosto". Para aumentar a resolução
+        de uma foto ou vídeo que você já tem, use "Aumentar Resolução".
+      </Alert>
+
       <Form onSubmit={handleSubmit}>
         <Row className="g-3">
           <Col xs={12}>
