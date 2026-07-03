@@ -4,6 +4,17 @@ Repositório principal da arquitetura do "AP AI Studio". Este repositório cont�
 
 ## Estrutura do Repositório
 - `PROMPT_MASTER.md`: O "código-fonte" lógico (Prompt Nível 10) que deve ser usado para inicializar a criação ou atualização da infraestrutura do estúdio pela IA.
+- `MANUAL_USO.md`: Manual do usuário passo a passo (didático, para quem nunca usou o pipeline) — como rodar cada função (`--mode`) do `run_vfx.py`: troca de rosto, geração de vídeo, edição de imagem, clonagem de voz, dublagem, remoção de ruído, geração de música e masterização final.
+- `vfx_aliases.sh`: atalhos de terminal (`vfx-rosto`, `vfx-video`, `vfx-ajuda` etc.), carregados automaticamente via `~/.bashrc` — ver seção 10 do `MANUAL_USO.md`.
+- `run_vfx.py` / `test_run_vfx.py`: orquestrador principal e sua suíte de testes.
+- `tts_synthesize.py` / `demucs_separate.py`: scripts standalone chamados pelo `run_vfx.py` (modos `tts` e `denoise`), cada um no seu próprio ambiente Conda.
+- `webui/`: interface web (FastAPI + React/TypeScript/Tailwind/Bootstrap), acessível via
+  Tailscale em `http://100.122.206.41:8299` (`vfx-web` liga). Todas as 10 funções do
+  `run_vfx.py` (Fases A+B) — ver seção 11 do `MANUAL_USO.md`. `webui/backend/` (env
+  Conda `webui-pipeline`, testes em `webui/backend/test_backend.py`) chama `run_vfx.py`
+  como subprocesso, mesma lógica dos atalhos `vfx-*` — não duplica a lógica dos Gates
+  (exceção: dublagem chama o FaceFusion direto, igual ao atalho `vfx-dublar`).
+  `webui/frontend/` (Vite): `npm run build` gera `webui/backend/static/`.
 
 ---
 

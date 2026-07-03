@@ -38,7 +38,7 @@ Escreva o script `asyncio` principal, registrando cada decisão de gate (aprovad
    * **Gate 3 - I/O de Disco (NVENC Chunking):** Antes do FFmpeg usar `nvenc` e gravar os arquivos intermediários no formato *ffv1* ou *libx264 -crf 0* em `/home/ap/ai_pipeline` (NVMe compartilhado com o SO). Checar espaço livre em `/` antes de iniciar e abortar se estiver abaixo da margem de segurança, já que não há mais um disco isolado para conter o consumo.
 2. **Modo de Confiança (opcional, flag `--auto-approve`):** depois de validar os 3 gates manualmente nos primeiros runs de uma sessão, permitir pular a confirmação interativa dos Gates 1 e 2 em renders curtos/de teste (útil na iteração da Fase 3B, onde se espera bastante tentativa e erro) — a decisão continua sendo registrada no log (`run_vfx.log`) mesmo sem prompt, pra não perder rastreabilidade. **O Gate 3 (espaço em disco crítico) nunca é pulável com essa flag** — sempre aborta se estiver abaixo da margem de segurança, independente do modo.
 3. *Wayland Guard* (`QT_QPA_PLATFORM=offscreen`) e `--dry-run` puro (somente stdout).
-4. Seleção de rosto no FaceFusion via **modo de rosto de referência** (`--face-selector-mode reference` + foto de referência da pessoa a inserir), evitando depender de filtros de idade/gênero para escolher o alvo — confirme o nome exato do flag na versão instalada. Polling dinâmico de `/system_stats`. Higiene de metadados EXIF da foto via `exiftool -all=` (ou `mat2`), em vez de lógica custom com `PIL` — cobre mais formatos e campos de metadado. **Nota de execução (Fase 3 real):** `exiftool` instalado via `sudo apt install libimage-exiftool-perl` (v12.76) e `sanitize_exif` testada ponta a ponta com imagem real contendo `Artist`/`GPS` — campos confirmados removidos após a limpeza.
+4. Seleção de rosto no FaceFusion via **modo de rosto de referência** (`--face-selector-mode reference` + foto de referência da pessoa a inserir), evitando depender de filtros de idade/gênero para escolher o alvo — confirme o nome exato do flag na versão instalada. Polling dinâmico de `/system_stats`. Higiene de metadados EXIF da foto via `exiftool -all=` (ou `mat2`), em vez de lógica custom com `PIL` — cobre mais formatos e campos de metadado. **Nota de execução (Fase 3 real):** `exiftool` instalado via `sudo apt install libimage-exiftool-perl` (v12.76) e `sanitize_exif` testada ponta a ponta com imagem real contendo `Artist`/`GPS` — campos confirmados removidos após a limpeza. **Achado adicional (primeiro face-swap real, pós-Fase 4):** `build_facefusion_command` usava `"python"` genérico, que resolvia pro interprete do ambiente Conda ativo no processo do `run_vfx.py` (`vfx-pipeline`, do ComfyUI) — sem `onnxruntime` instalado lá, já que o FaceFusion vive num ambiente Conda **separado** (`facefusion-pipeline`, ver Fase 1). Corrigido usando o caminho explícito `~/miniconda3/envs/facefusion-pipeline/bin/python`. Testado ponta a ponta com as imagens de exemplo oficiais do próprio FaceFusion (`facefusion/facefusion-assets`, não são fotos de pessoas reais identificáveis) — rosto trocado com sucesso, mantendo pose/iluminação da cena de destino.
 **Critério de Conclusão:** os 3 gates disparam corretamente em teste forçado (memória, VRAM, disco), teste de aceitação do Gate 1 (isolamento de scope) validado, e um dry-run completo roda do início ao fim sem erro.
 
 **Fase 3B: Modo Vídeo Generativo / Reencenação de Movimento (Baixo-VRAM, experimental)**
@@ -56,6 +56,10 @@ Aplicável somente quando a tarefa exigir mais do que troca de identidade facial
 1. **Gate 1 não era aplicado no modo vídeo** (achado de auditoria antes do render) — corrigido com `ensure_comfyui_running_under_jail()`, que reinicia o ComfyUI dentro de um `systemd-run --scope` dedicado antes de qualquer render.
 2. **`conda run` não repassa stdin** — os prompts `[Y/n]` do Gate 3 (nunca pulável) travavam com `EOFError` mesmo com `--auto-approve`. Usar `conda activate` em vez de `conda run` para invocações interativas do `run_vfx.py`. Não é bug do pipeline (script lê stdin normalmente com `conda activate`), mas `confirm()` foi ajustada para capturar esse `EOFError` e devolver uma mensagem clara explicando a causa, em vez de um traceback cru.
 3. **Arquivo errado de text encoder**: o `umt5_xxl_fp8_e4m3fn_scaled.safetensors` (variante "scaled", do repo `Comfy-Org/Wan_2.2_ComfyUI_Repackaged`, pensado pro loader nativo do ComfyUI) é rejeitado pelo `LoadWanVideoT5TextEncoder` do WanVideoWrapper (`ValueError: fp8 scaled is not supported by this node`). O arquivo certo pra esse node é `Kijai/WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors` (não-scaled).
+
+**Atualização de escopo (pedido do usuário, pós-Fase 4):** duração mínima passou a ser 5s, média 10-15s (o texto original da Fase 3B previa só "clipes curtos" sem número). Confirmado nos workflows de exemplo do próprio Kijai que o modelo **A14B roda nativamente a 16fps** (24fps é especifico do modelo 5B, que não usamos) — nosso teste original usava `frame_rate=16` errado como `8` no `VHS_VideoCombine`, o que teria deixado qualquer clipe gerado em câmera lenta (2x mais devagar) sem ninguém perceber, já que o número de frames em si sempre esteve certo. Corrigido: `frame_rate=16`, novo padrão `num_frames=161` (~10s), `MAX_VIDEO_FRAMES=241` (~15s). **Testado nessa escala nova (CONCLUÍDO):** 161 frames (~10s), render completo em ~9min15s, sem OOM, dentro da jaula de 28GB/4GB swap. Arquivo final confirmado via `ffprobe`: **10.7 segundos**, 1280×1280, **321 frames reais** (não só um número de frame_rate mudado).
+
+**Interpolação de frames (pedido do usuário — cinema/TV usa ~24-30fps, não os 16fps nativos do modelo):** usuário corretamente notou que 16fps nativo é mais baixo que o padrão de cinema (24fps) ou TV (30fps) — mas mudar só o `frame_rate` de salvamento não teria resolvido isso de verdade (só mudaria a velocidade de reprodução, é o mesmo tipo de bug do item acima, só que ao contrário: acelerar em vez de desacelerar). A correção real é **interpolação de frames**: o nó nativo `FrameInterpolate` do ComfyUI (`comfy_extras/nodes_frame_interpolation.py`, já vem com a instalação, não precisou de node pack extra) usa um modelo RIFE (`Comfy-Org/frame_interpolation/rife_v4.25.safetensors`, ~22.6MB, adicionada categoria `frame_interpolation` no `extra_model_paths.yaml`) pra gerar quadros intermediários de verdade entre os frames existentes. `multiplier=2` dobra os 16fps nativos pra ~32 quadros reais por segundo, salvos a `WAN22_OUTPUT_FPS=30`. Testado e confirmado: os 321 frames reais no arquivo final batem exatamente com `(161-1)*2+1=321`, confirmando que a interpolação rodou de verdade, não é só cosmético.
 4. **`WanVideoVAELoader` exige `precision` mesmo aparecendo como "optional" no `/object_info`** — sem isso, o ComfyUI derruba o job com `TypeError` depois de já ter rodado os dois samplers (caro, quase 1min de processamento perdido). Sempre passar `precision` explicitamente.
 
 **Fase 4: Render Final e Masterização**
@@ -64,5 +68,204 @@ Aplicável somente quando a tarefa exigir mais do que troca de identidade facial
 **Critério de Conclusão:** arquivo final joga certo, áudio/legendas sincronizados, sem artefato visível de troca de quadro.
 
 **Nota de execução (Fase 4 real, CONCLUÍDA):** `-vsync` está deprecated no ffmpeg 6.1.1 instalado neste servidor — usar `-fps_mode cfr` no lugar. Comando final: dois inputs (`-i original -i processado`), vídeo vem do processado (`-map 1:v:0`), áudio/legendas/metadados vêm do original sem recodificar (`-map 0:a? -map 0:s? -c:a copy -c:s copy -map_metadata 0`, os `?` tornam opcional caso não exista). Testado ponta a ponta com um vídeo sintético (h264+AAC, título nos metadados) + o clipe real do Wan2.2: saída final confirmada via `ffprobe` com vídeo 1280×1280 do clipe processado, **24fps CFR**, matriz **bt709** nos três campos de cor, áudio AAC e metadados (`title`) preservados do original. **Achado importante durante o teste:** o `SaveAnimatedWEBP` nativo do ComfyUI gera um WebP animado que o demuxer do ffmpeg **não lê direito** (`skipping unsupported chunk: ANIM/ANMF`, decode falha) — troquei o nó final do workflow da Fase 3B de `SaveAnimatedWEBP` para `VHS_VideoCombine` (node pack `Kosinkadink/ComfyUI-VideoHelperSuite`, formato `video/h264-mp4`), que gera MP4 de verdade sem esse problema. Isso afeta a Fase 3B também — o clipe de teste gerado lá agora sai em `.mp4`, não `.webp`.
+
+**Fase 5 (pendente, pedido do usuário): Imagem para Vídeo (I2V)**
+Hoje o pipeline só faz **texto → vídeo** (T2V). O usuário pediu também **imagem → vídeo** (I2V) —
+animar uma foto existente, em vez de partir só de uma descrição em texto. Isso é o modo mais
+alinhado com o objetivo original do projeto (reencenar cenas/fotos de família), mas ainda não
+foi implementado. Escopo estimado, sem inventar números além do que já foi confirmado:
+1. Baixar os pesos GGUF do **Wan2.2-I2V-A14B** (repo `QuantStack/Wan2.2-I2V-A14B-GGUF` na
+   HuggingFace — ainda não confirmei tamanho exato, mas pelo padrão do T2V deve ficar na casa
+   de ~20-26GB pros dois experts MoE + text encoder, similar ao que já baixamos).
+2. Adaptar o workflow: trocar `WanVideoEmptyEmbeds` por `LoadImage` + `WanVideoImageToVideoEncode`
+   (nós que já identifiquei durante a pesquisa da Fase 3B, ao inspecionar o workflow de exemplo
+   `wanvideo_2_2_I2V_A14B_example_WIP.json` do próprio Kijai).
+3. Adicionar `--source-image` (ou modo `--mode video-i2v`) ao `run_vfx.py`.
+4. Testar de ponta a ponta com uma imagem real, do mesmo jeito que validamos o T2V.
+**Critério de Conclusão (proposto):** uma foto de teste anima com movimento coerente, sem OOM,
+mesma duração mínima/média definida acima (5s mínimo, 10-15s média).
+
+**Nota de execução (Fase 5 real, CONCLUÍDA):** pesos `QuantStack/Wan2.2-I2V-A14B-GGUF` (HighNoise+LowNoise, ~19.3GB), VAE e text encoder reaproveitados do T2V (mesmos arquivos). Workflow: `build_wan22_video_workflow` ganhou parâmetro opcional `source_image_path` — quando informado, troca `WanVideoEmptyEmbeds` por `LoadImage` → `ImageScale` (nativo, em vez do `ImageResizeKJv2` do Kijai que não temos instalado) → `WanVideoImageToVideoEncode`, mantendo o resto do grafo (block swap, samplers, decode, interpolação, upscale, save) idêntico ao T2V. Achado: `LoadImage` só aceita nomes de arquivo dentro de `ComfyUI/input/`, não caminho absoluto — criada `stage_image_for_comfyui()` que copia a foto de origem pra lá com nome único antes de montar o workflow. Testado ponta a ponta com a foto de exemplo oficial do FaceFusion + prompt pedindo "vira a cabeça pra olhar de lado": confirmado visualmente comparando frame de 1s (de frente) com frame de 4s (perfil) — a animação é real, não uma imagem estática repetida. Arquivo final: 1280×1280, 30fps, 5.37s, sem OOM.
+
+**Fase 6 (pedido do usuário, CONCLUÍDA): Inpainting / edição geral de imagem**
+Checkpoint `sd_xl_base_1.0_inpainting_0.1.safetensors` (conversão single-file do modelo
+oficial `diffusers/stable-diffusion-xl-1.0-inpainting-0.1`, ~6.94GB). `build_inpaint_workflow`
+usa nós nativos do ComfyUI (`CheckpointLoaderSimple` → `VAEEncodeForInpaint` com uma mascara
+separada carregada via `LoadImage`+`ImageToMask` → `KSampler` → `VAEDecode` → `SaveImage`).
+Escopo deliberado: máscara manual (branco=apagar, preto=manter), não segmentação automática
+por texto (exigiria baixar GroundingDINO+SAM, deixado de fora por ora). Modo `--mode inpaint`
+no `run_vfx.py`.
+
+**Nota de execução (Fase 6 real, CONCLUÍDA):** testado de ponta a ponta duas vezes.
+**Achado real #1:** com `positive_prompt` vazio, o SDXL às vezes preenche a área mascarada com
+conteúdo sem relação nenhuma com a cena (gerou um padrão tipo bandeira do zero) em vez de
+continuar o fundo naturalmente — mecanismo funcionava, qualidade ruim. Corrigido não no
+código, mas na orientação: `run_vfx.py` agora avisa (`logger.warning`) quando `--mode
+inpaint` é chamado sem `--prompt`, recomendando descrever o que deveria aparecer no lugar
+(ex.: "fundo gradiente rosa e azul liso"). Reteste com prompt descritivo: fundo ficou
+coerente com o restante da cena, resultado bem melhor. **Achado real #2:** `--output` estava
+sendo completamente ignorado — o resultado sempre caía com nome fixo dentro de
+`ComfyUI/output/`, sem nenhum jeito de saber onde parou. Corrigido com
+`get_comfyui_output_file()`, que lê `/history` do ComfyUI pra achar o arquivo real gravado e
+copia pro caminho pedido em `--output`.
+
+**Fase 7 (pedido do usuário, CONCLUÍDA): Processar vídeos longos em pedaços**
+`split_video_into_chunks`/`concat_video_chunks`/`process_long_faceswap`, novo
+`--chunk-seconds` no modo faceswap. **Achado real (pego por um teste funcional rodando
+ffmpeg de verdade, não mock):** dividir com `-c copy` (stream-copy) só corta em keyframes —
+um vídeo de teste com poucos keyframes virou 1 pedaço em vez dos 3+ esperados, quebrando
+silenciosamente o propósito de limitar o tamanho por pedaço. Corrigido recodificando no
+corte (`libx264 -preset ultrafast` + `-force_key_frames`), sem custo real de qualidade
+composta porque cada pedaço já ia ser recodificado pelo FaceFusion na etapa seguinte de
+qualquer jeito. **Achado real #2 (teste de ponta a ponta pelo orquestrador completo, não só
+a unidade):** o primeiro pedaço falhou com `Failed to allocate memory for requested buffer
+of size 294912` (só 288KB!) mesmo com "8.1GB livres" segundo o Gate 2 — o ComfyUI (processo
+GPU separado) tinha 7GB de VRAM presos num checkpoint SDXL de um teste de inpainting anterior,
+sem nenhuma relação com o FaceFusion. ComfyUI e FaceFusion são processos independentes, cada
+um só enxerga a própria memória — o Gate 2 do `run_vfx.py` mede VRAM livre do sistema todo,
+mas isso não garante que o ComfyUI vá *liberar* o que já reservou pra si. Corrigido com
+`free_comfyui_vram()`, que chama o endpoint `/free` do próprio ComfyUI (`unload_models` +
+`free_memory`) antes de qualquer operação pesada do FaceFusion (face-swap normal, face-swap
+em pedaços, remoção de fundo) — tolerante a falha caso o ComfyUI não esteja rodando. Testado
+ao vivo: 7499MiB → 811MiB de uso depois da chamada, reteste do face-swap em pedaços com
+sucesso total (3/3 pedaços, vídeo final de 10.875s, rosto trocado confirmado até no último
+pedaço).
+
+**Fase 8 (pedido do usuário, CONCLUÍDA): TTS / clonagem de voz / dublagem**
+XTTS-v2 (Coqui, licença CPML — compatível com uso privado/não-comercial) rodando como script
+standalone (`tts_synthesize.py`) num ambiente Conda **separado** (`tts-pipeline`), mesma
+lógica do FaceFusion. **Achado real:** o pacote `coqui-tts` (e o node ComfyUI-XTTS que
+tentamos primeiro, removido) tem uma inconsistência interna de versão — declara
+`transformers>=4.57` mas o código vendorizado do XTTS ainda chama uma função
+(`isin_mps_friendly`) removida no `transformers` 5.x. Único intervalo que funciona:
+`transformers==4.57.6`. Testado ponta a ponta: fala real em português gerada (24kHz, ~8s),
+depois aplicada a um vídeo via `lip_syncer` do FaceFusion (dublagem completa, boca
+sincronizada com a voz nova) — confirmado com o arquivo final tendo trilha de áudio nova e
+vídeo válido.
+
+**Fase 9 (pedido do usuário, CONCLUÍDA): Remoção de ruído / isolamento de voz**
+Correção da Fase 8: `voice_extractor` do FaceFusion não é usável standalone. Solução real:
+**Demucs** (Meta AI, `facebookresearch/demucs`, padrão da indústria pra separação de fontes de
+áudio), rodando como script standalone (`demucs_separate.py`) num ambiente Conda próprio
+(`noise-pipeline`). **Achado real #1:** o torch instalado por padrão via pip (2.6.0+cu124) dá
+`CUDA error: no kernel image is available for execution on the device` nessa RTX 5060 Ti —
+GPU nova demais pros kernels pré-compilados dessa versão. Corrigido instalando torch
+2.12.1+cu130 (mesma versão que já funciona no `vfx-pipeline`/ComfyUI). **Achado real #2:**
+precisou também do pacote `torchcodec` extra — o `torchaudio` dessa versão de torch usa ele
+por padrão pra salvar áudio, e não vem junto na instalação normal. Testado ponta a ponta com
+áudio sintético (fala + ruído rosa misturados): arquivos de saída com hash MD5 diferentes do
+original (confirma processamento real, não cópia), voz e ruído separados em arquivos distintos.
+Modo `--mode denoise` no `run_vfx.py`, com `--output-instrumental` opcional pra guardar o que
+foi removido também. **Escopo deliberado:** o "instrumental"/ruído separado é a "sobra" do
+processo, não uma classificação específica de tipo de ruído (vento, chiado, etc.) — serve bem
+pra separar voz de música/fundo, é uma abordagem diferente de um denoiser espectral dedicado
+(ex.: DeepFilterNet), que ficou fora de escopo por ora.
+
+**Fase 10 (pedido do usuário, CONCLUÍDA): Geração de música**
+MusicGen (Meta AI) via node pack `ebrinz/ComfyUI-MusicGen-HF`, rodando dentro do próprio
+processo do ComfyUI (não precisou de ambiente Conda separado — ao contrário de TTS/Demucs,
+não teve conflito de dependência com o WanVideoWrapper). Modo `--mode music`, novo
+`--music-duration`. **Achado real (autocrítica: eu tinha dito "todas as 6 lacunas fechadas"
+numa mensagem anterior sem ter testado isso de verdade — só tinha instalado as dependências,
+nunca rodei uma geração real; usuário perguntou "só falta o commit?" e essa verificação
+revelou o gap):** primeira tentativa falhou com `FileNotFoundError` — o node
+`MusicGenAudioToFile` não cria a pasta `ComfyUI/output/audio/` sozinho antes de salvar (bug
+do node pack, não nosso). Corrigido com `ensure_comfyui_audio_output_dir()`, chamado antes de
+qualquer job de música. **Achado real #2:** esse node não registra o arquivo de saída em
+`entry["outputs"]` do jeito que `SaveImage`/`VHS_VideoCombine` fazem (retorna só uma STRING,
+sem marcar como saída de UI) — `get_comfyui_output_file()` não serve aqui. Resolvido achando
+o arquivo mais recente com o prefixo esperado por data de modificação. Testado ponta a ponta
+pelo `run_vfx.py` real: música real gerada (5.94s, pedido de 6s), copiada pro caminho certo.
+
+**Achados de infraestrutura que afetam TUDO que passa pelo FaceFusion (Fases 6/7/8):**
+1. **`onnxruntime-gpu` caía pra CPU silenciosamente** (sem erro nenhum no retorno) porque as
+   bibliotecas CUDA 12.x instaladas via pip (`nvidia-cublas-cu12` etc) ficam dentro do
+   `site-packages`, fora do caminho de busca do linker dinâmico — diferente do `torch`, que
+   se auto-registra. Corrigido com `build_facefusion_env()`, que monta um `LD_LIBRARY_PATH`
+   explícito. Medido ao vivo: 46s (cold start GPU) → 1.5s (GPU quente) vs os ~2.7s que
+   estavam rodando em CPU sem ninguém perceber.
+2. **`lip_syncer` (wav2lip) roda em CPU por decisão oficial (não é mais um bug pendente).**
+   Falha em CUDA com `CUBLAS failure 3: the resource allocation failed`, mesmo com VRAM de
+   sobra (14.9GB livres no teste) e mesmo `LD_LIBRARY_PATH` que funcionou pro
+   `background_remover`. **Causa raiz encontrada (investigação aprofundada, sem correção
+   limpa disponível):** a RTX 5060 Ti é arquitetura Blackwell,
+   compute capability **12.0 (sm_120)** — o pacote oficial `onnxruntime-gpu` do PyPI (testado
+   1.26.0 e 1.27.0) não traz kernels cuBLAS pré-compilados pra essa arquitetura ainda (achado
+   confirmado via issues abertas no repo oficial `microsoft/onnxruntime`, ex. #26245 e #26177).
+   O `background_remover` (modnet) "funciona" provavelmente via compilação JIT de PTX
+   (explica o 46s→1.5s: a primeira execução compila, a segunda reaproveita o cache) — o
+   `wav2lip` usa uma operação de cuBLAS que aparentemente não tem esse caminho de fallback JIT,
+   e falha direto. **Tentativas que NÃO resolveram:** (a) atualizar pra `onnxruntime-gpu==1.27.0`
+   — passou a exigir `libcudart.so.13`, e os pacotes pip `nvidia-cuda-runtime-cu13`/
+   `nvidia-cublas-cu13`/`nvidia-cufft-cu13`/etc falham ao compilar wheel neste ambiente (só
+   `nvidia-cudnn-cu13` instalou, sem trazer o cudart necessário); (b) forçar
+   `--execution-providers tensorrt` — o SDK completo do TensorRT não está instalado (só a
+   biblioteca do provider), cai pra CPU do mesmo jeito. **Rejeitado de propósito:** existe um
+   build não-oficial (`Natfii/onnxruntime-gpu-blackwell`) com kernels sm_120, mas tem 0 estrelas
+   e um único commit em fev/2026 sem manutenção — instalar um binário pré-compilado dessa fonte
+   seria um risco de segurança real, não vale a pena pra um problema que já tem contorno
+   funcional. **Decisão formalizada com o usuário (2026-07-02):** confirmado que não há
+   alternativa viável sem trocar esse problema contornável por um risco maior (binário não
+   verificado) ou esforço desproporcional (SDK completo do TensorRT sem garantia de
+   funcionar; reescrever o wav2lip em PyTorch exigiria patchear o FaceFusion, frágil contra
+   atualizações). **CPU é o modo oficial e definitivo** em `build_lip_syncer_command`
+   (~136s pra um clipe de 270 frames, validado ponta a ponta duas vezes) — não é mais
+   tratado como bug pendente, é uma decisão de arquitetura aceita. Os parâmetros
+   `cuda`/`tensorrt` continuam disponíveis na função pra reavaliar no futuro sem precisar
+   mudar código, quando o ecossistema onnxruntime/CUDA amadurecer suporte oficial pra
+   Blackwell (GPU lançada recentemente).
+3. **Correção de um erro meu de pesquisa anterior:** eu tinha dito que `voice_extractor` do
+   FaceFusion já cobria "remoção de ruído/isolamento de voz" como processador pronto pra usar.
+   **Isso estava errado** — `--processors voice_extractor` não existe nessa versão instalada
+   (`error: invalid choice`). `voice_extractor` só existe como componente interno
+   (`facefusion/voice_extractor.py`), usado automaticamente pelo `lip_syncer` antes de
+   sincronizar os lábios, não como ferramenta standalone pra limpar um áudio qualquer. Função
+   `build_voice_extractor_command` removida do código (não correspondia a um recurso real).
+   **Correção posterior (Fase 9, ver acima):** essa lacuna foi de fato fechada depois, com o
+   Demucs — a frase acima descrevia o estado *antes* da Fase 9 existir, mantida só pelo
+   histórico de como o erro foi descoberto e corrigido.
+
+---
+
+**Referência rápida (consolidada Fases 0-10, verificada ao vivo em 2026-07-02):**
+Esta seção não substitui o histórico acima — é só um resumo de "onde as coisas estão"
+pra não precisar garimpar os achados de cada fase toda vez.
+
+*Ambientes Conda (4, isolados por conflito real de dependência, não por preferência):*
+| Ambiente | Usado por | Motivo do isolamento |
+|---|---|---|
+| `vfx-pipeline` | ComfyUI (T2V/I2V, inpaint, remoção de fundo via node, música) | Base — torch 2.12.1+cu130 |
+| `facefusion-pipeline` | FaceFusion (`faceswap`, `removebg`, `lip_syncer`/dublagem) | `numpy==2.2.1` fixo, colide com ComfyUI |
+| `tts-pipeline` | `tts_synthesize.py` (XTTS-v2) | exige `transformers==4.57.6` exato |
+| `noise-pipeline` | `demucs_separate.py` (Demucs) | precisa torch 2.12.1+cu130 + `torchcodec` |
+
+*Modos do `run_vfx.py` (`--mode`, ver `build_parser()` em `run_vfx.py:1438`):*
+| `--mode` | O que faz | Flags relevantes |
+|---|---|---|
+| `faceswap` | Troca de rosto (FaceFusion, modo referência); com `--chunk-seconds`, processa vídeo longo em pedaços | `--source --target --output [--chunk-seconds N]` |
+| `video` | Geração T2V ou I2V (Wan2.2, GGUF Q4_K_M) | `--prompt [--source-image] [--width --height --num-frames]` |
+| `master` | Costura final CFR + bt709, remapeia áudio/legendas do original pro vídeo processado | `--original --processed-video --output [--fps]` |
+| `inpaint` | Edição de imagem com máscara manual (SDXL inpainting) | `--source-image --mask-image --output [--prompt]` (sem `--prompt`: aviso, não erro) |
+| `removebg` | Remoção de fundo (FaceFusion `background_remover`) | `--target --output` |
+| `tts` | Síntese de fala / clonagem de voz (XTTS-v2) | `--text --output (--speaker \| --speaker-wav obrigatório) [--language]` |
+| `denoise` | Isola voz / separa de ruído-fundo (Demucs) | `--target --output [--output-instrumental]` |
+| `music` | Geração de música (MusicGen) | `--prompt --output [--music-duration]` |
+
+*Modelos baixados (`/home/ap/ai_pipeline/models_hub/models/`, ~42.6GB total confirmado por `du -h` em 2026-07-02):*
+- `diffusion_models/`: Wan2.2 T2V-A14B e I2V-A14B, GGUF Q4_K_M, HighNoise+LowNoise cada (4 arquivos, ~9GB cada, ~36GB)
+- `text_encoders/umt5-xxl-enc-fp8_e4m3fn.safetensors` (6.3GB, compartilhado T2V/I2V)
+- `vae/Wan2.1_VAE.safetensors` (243MB)
+- `frame_interpolation/rife_v4.25.safetensors` (22MB)
+- `upscale_models/RealESRGAN_x4plus.pth` (64MB)
+- `checkpoints/sd_xl_base_1.0_inpainting_0.1.safetensors` (6.5GB)
+- Disco (`/`, NVMe compartilhado com o SO): 339GB usados / 106GB livres de 468GB (77%) em 2026-07-02.
+
+*Testes:* `test_run_vfx.py`, 57 testes (mix de unitários e funcionais reais — ex. ffmpeg de
+verdade cortando vídeo, OOM-kill real via `systemd-run`), todos passando.
+
+*Pendência conhecida:* todo o trabalho das Fases 5-10 (`run_vfx.py`, `test_run_vfx.py`,
+`tts_synthesize.py`, `demucs_separate.py`, este documento) está **não commitado** — só o
+commit `00e41fb` (Fases 0-4) foi enviado ao `origin/main`. Combinado com o usuário: só
+commitar quando ele confirmar que está tudo certo.
 
 [FIM DO PROMPT - ARQUITETURA FAIL-SAFE]
