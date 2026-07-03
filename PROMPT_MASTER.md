@@ -602,7 +602,11 @@ profissional, cada uma com nota própria — e correções aplicadas em seguida:
     reais de Trocar Rosto (mesma origem, alvos diferentes) via `curl`, sequenciais,
     ambos concluídos; verificação visual real com Chrome headless confirmando a fila
     de Trocar Rosto renderizando certo no navegador (2/2 concluídos, log e badges
-    corretos por item).
+    corretos por item). **Fechamento posterior:** o lote de Limpar Áudio também foi
+    verificado visualmente (não só por teste unitário) — 2 áudios reais (tons puros
+    gerados com `wave`/`struct`, sem depender de arquivo externo), processados sem
+    `--dry-run` de verdade (pra ver o player de áudio renderizado, não só o "na
+    fila"), confirmando "Voz isolada" + "Resto" com botão de baixar em cada item.
 18. **`friendlyErrors.ts` estendido pras outras 5 funções do pipeline** — cobria só
     Gates/OOM/ComfyUI; agora também FaceFusion (troca de rosto), remoção de fundo,
     TTS, Demucs (limpar áudio), FFmpeg (masterização) e modelo/arquivo ausente
@@ -614,10 +618,14 @@ profissional, cada uma com nota própria — e correções aplicadas em seguida:
     eu não tenho como confirmar de antemão (ex.: não afirmo que foi o filtro de idade
     do FaceFusion que rejeitou um rosto, porque não tenho o texto exato desse cenário
     específico) — mantém a regra de não inventar. Verificação: 7 testes novos com o
-    texto de log real de cada cenário (não forcei os 5 erros ao vivo contra o
-    servidor, já que o texto do log é o mesmo já confirmado por grep, e as 3 falhas
-    reais anteriores — Gates/OOM/ComfyUI — já foram verificadas ao vivo em rodadas
-    passadas).
+    texto de log real de cada cenário. **Fechamento posterior — forcei um erro real
+    de verdade** (não só o teste unitário com texto copiado do grep): rodei um
+    `--mode faceswap` de verdade com uma foto sem rosto nenhum (cor sólida) como
+    origem. O FaceFusion falhou de verdade (`"[FACEFUSION.CORE] no source face
+    detected!"`, código de saída 1) e a mensagem amigável apareceu certa na tela, ao
+    vivo, pela webui real (não simulação) — confirmado por captura de tela. Essa é a
+    diferença entre "o regex bate com o texto que eu acho que vai aparecer" e "o
+    regex bate com o texto que apareceu de verdade numa falha genuína".
 
 **Nota registrada, não uma ação (achado do perfil SO/DevOps + uso profissional):** o
 teto de `MAX_VIDEO_WIDTH`/`MAX_VIDEO_HEIGHT` = 720×720 em `vfx_config.py` existe porque
