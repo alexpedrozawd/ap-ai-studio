@@ -43,6 +43,7 @@ from run_vfx import (
 	run_in_memory_jail,
 	split_video_into_chunks,
 	stage_image_for_comfyui,
+	truncate_log_if_large,
 	validate_pipeline_path,
 )
 
@@ -70,6 +71,25 @@ def test_conda_binary_present():
 
 def test_unknown_binary_absent():
 	assert check_binary("binario_que_nao_existe_no_sistema") is False
+
+
+def test_truncate_log_if_large_leaves_small_log_untouched(tmp_path):
+	log_path = tmp_path / "pequeno.log"
+	log_path.write_text("algumas linhas de log\n")
+	truncate_log_if_large(str(log_path), threshold_bytes=1024)
+	assert log_path.read_text() == "algumas linhas de log\n"
+
+
+def test_truncate_log_if_large_zeroes_out_log_above_threshold(tmp_path):
+	log_path = tmp_path / "grande.log"
+	log_path.write_text("x" * 2000)
+	truncate_log_if_large(str(log_path), threshold_bytes=1024)
+	assert log_path.stat().st_size == 0
+
+
+def test_truncate_log_if_large_tolerates_missing_file(tmp_path):
+	missing = tmp_path / "nao_existe.log"
+	truncate_log_if_large(str(missing), threshold_bytes=1024)  # nao deve levantar excecao
 
 
 def test_port_free_detects_occupied_port():

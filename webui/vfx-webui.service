@@ -1,0 +1,13 @@
+[Unit]
+Description=AP AI Studio - Interface Web (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ap/ap-ai-studio/webui/backend
+ExecStart=/home/ap/miniconda3/envs/webui-pipeline/bin/python -m uvicorn main:app --host 100.122.206.41 --port 8299
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -2,8 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from jobs import job_output_path, job_upload_dir, launch, new_job
-from routes_faceswap import save_upload
+from jobs import finish, job_upload_dir, new_job, save_upload, set_output
 
 router = APIRouter()
 
@@ -22,8 +21,7 @@ async def create_tts_job(
 
 	job = new_job("tts")
 	upload_dir = job_upload_dir(job.id)
-	output_path = job_output_path(job.id, "fala_gerada.wav")
-	job.output_path = output_path
+	output_path = set_output(job, "fala_gerada.wav")
 
 	extra_args = ["--text", text, "--language", language, "--output", output_path]
 	if speaker:
@@ -31,7 +29,4 @@ async def create_tts_job(
 	if has_speaker_wav:
 		speaker_wav_path = await save_upload(upload_dir, speaker_wav)
 		extra_args += ["--speaker-wav", speaker_wav_path]
-	if dry_run:
-		extra_args += ["--dry-run"]
-	launch(job, extra_args)
-	return {"job_id": job.id}
+	return finish(job, extra_args, dry_run)

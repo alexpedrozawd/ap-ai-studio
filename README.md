@@ -14,12 +14,19 @@ Existem duas formas de usar o pipeline — escolha a que preferir, elas fazem ex
 
 ### Opção A — Interface web (mais fácil, sem terminal)
 
-1. Num terminal, ligue a interface:
+> ✅ **Já está ligada agora**, supervisionada pelo `systemd --user`
+> (`vfx-web-enable`, confirmado em 2026-07-03) — sobrevive a crash e a reboot do
+> servidor sem precisar religar na mão. Pule direto pro passo 2. O passo 1 só é
+> necessário se você desligou (`vfx-web-disable`) e quer religar.
+
+1. Ligue a interface — duas formas:
    ```bash
-   vfx-web
+   vfx-web           # primeiro plano, fica preso ao terminal (Ctrl+C desliga)
+   vfx-web-enable    # supervisionada (systemd --user): reinicia sozinha se cair
+                      # ou se o servidor reiniciar; vfx-web-status/-disable controlam
    ```
-   Na primeira vez ele builda o frontend sozinho (demora um pouco); nas próximas, sobe
-   direto. Deixe esse terminal aberto — `Ctrl+C` desliga.
+   Na primeira vez ela builda o frontend sozinha (demora um pouco); nas próximas, sobe
+   direto.
 2. Abra no navegador: **`http://100.122.206.41:8299`** (funciona no navegador do
    próprio servidor ou de qualquer aparelho na sua rede Tailscale).
 3. Navegue pelo menu no topo:
@@ -76,15 +83,32 @@ vivo. Ver [seção 3 do MANUAL_USO.md](MANUAL_USO.md) para o detalhe de cada Gat
 - `PROMPT_MASTER.md`: O "código-fonte" lógico (Prompt Nível 10) que deve ser usado para inicializar a criação ou atualização da infraestrutura do estúdio pela IA.
 - `MANUAL_USO.md`: Manual do usuário passo a passo (didático, para quem nunca usou o pipeline) — como rodar cada função (`--mode`) do `run_vfx.py`: troca de rosto, geração de vídeo, edição de imagem, clonagem de voz, dublagem, remoção de ruído, geração de música e masterização final.
 - `vfx_aliases.sh`: atalhos de terminal (`vfx-rosto`, `vfx-video`, `vfx-ajuda` etc.), carregados automaticamente via `~/.bashrc` — ver seção 10 do `MANUAL_USO.md`.
-- `run_vfx.py` / `test_run_vfx.py`: orquestrador principal e sua suíte de testes.
-- `tts_synthesize.py` / `demucs_separate.py`: scripts standalone chamados pelo `run_vfx.py` (modos `tts` e `denoise`), cada um no seu próprio ambiente Conda.
+- `run_vfx.py` / `test_run_vfx.py`: orquestrador principal e sua suíte de testes (62).
+- `tts_synthesize.py` / `demucs_separate.py`: scripts standalone chamados pelo `run_vfx.py` (modos `tts` e `denoise`), cada um no seu próprio ambiente Conda. `test_standalone_scripts.py` testa os dois via subprocesso real (6 testes).
 - `webui/`: interface web (FastAPI + React/TypeScript/Tailwind/Bootstrap), acessível via
-  Tailscale em `http://100.122.206.41:8299` (`vfx-web` liga). Todas as 10 funções do
-  `run_vfx.py` (Fases A+B) — ver seção 11 do `MANUAL_USO.md`. `webui/backend/` (env
-  Conda `webui-pipeline`, testes em `webui/backend/test_backend.py`) chama `run_vfx.py`
-  como subprocesso, mesma lógica dos atalhos `vfx-*` — não duplica a lógica dos Gates
-  (exceção: dublagem chama o FaceFusion direto, igual ao atalho `vfx-dublar`).
-  `webui/frontend/` (Vite): `npm run build` gera `webui/backend/static/`.
+  Tailscale em `http://100.122.206.41:8299` — **rodando agora, supervisionada pelo
+  `systemd --user`** (`vfx-web-enable`, ativado em 2026-07-03; `vfx-web-status` mostra o
+  estado). Todas as 10 funções do `run_vfx.py` (Fases A+B) — ver seção 11 do `MANUAL_USO.md`.
+  `webui/backend/` (env Conda `webui-pipeline`, 34 testes em `test_backend.py`) chama
+  `run_vfx.py` como subprocesso, mesma lógica dos atalhos `vfx-*` — não duplica a
+  lógica dos Gates (exceção: dublagem chama o FaceFusion direto, igual ao atalho
+  `vfx-dublar`). Também limita tamanho de upload (checado de verdade nos bytes
+  gravados, não só no cabeçalho declarado) e checa espaço em disco antes de aceitar
+  qualquer arquivo, e limpa jobs/uploads com mais de 7 dias automaticamente
+  (`jobs.py:cleanup_old_jobs`). `webui/frontend/` (Vite, 7 testes via Vitest):
+  `npm run build`/`vfx-web-build` gera `webui/backend/static/`. `webui/vfx-webui.service`:
+  unidade `systemd --user` que supervisiona a interface web (ativa, `vfx-web-status`
+  mostra o estado; `vfx-web-disable` desliga).
+
+## Segurança
+
+A interface web já passou por uma varredura dedicada de segurança (2026-07-03), que
+encontrou e corrigiu uma falha real de leitura arbitrária de arquivo (path traversal na
+rota que serve o frontend) e duas falhas menores de validação de entrada em upload —
+todas confirmadas por exploração real contra o servidor rodando, e reexploradas depois
+da correção pra confirmar que fecharam. Nenhuma delas dependia de autenticação: mesmo
+com a barreira do Tailscale, qualquer dispositivo na tailnet conseguiria explorar. Log
+técnico completo (payloads usados, causa raiz, correção) no `PROMPT_MASTER.md`.
 
 ---
 
@@ -112,3 +136,7 @@ Durante a execução da arquitetura gerada pelo script, você pode encontrar alg
 ### 5. Wayland Crash no Ubuntu 24.04 (Falta de Monitor)
 **Problema:** O terminal acusa um erro de "Could not load the Qt platform plugin wayland". O script aborta.
 **Solução:** Bibliotecas de processamento visual como o OpenCV tentaram invocar um renderizador de janelas e não encontraram uma tela gráfica disponível (comum em sessões remotas/SSH ou scripts sem janela). Confirme se a variável `export QT_QPA_PLATFORM=offscreen` está ativada (ou injetada no script) para forçar as bibliotecas a rodarem de modo "Headless" (Invisível).
+
+### 6. Interface web recusa o upload (HTTP 413 ou 507)
+**Problema:** Ao enviar um arquivo pela interface web, a resposta vem com erro em vez de criar o job.
+**Solução:** `413` = arquivo maior que o limite de 4GB (`MAX_UPLOAD_BYTES` em `webui/backend/config.py`) — normal pra vídeos muito longos, considere usar `--chunk-seconds` pelo terminal em vez da interface pra esses casos. `507` = disco já está abaixo da margem de segurança de 30GB antes mesmo do upload começar — libere espaço (`vfx-status` ou a aba Status da webui mostram o espaço livre) antes de tentar de novo.

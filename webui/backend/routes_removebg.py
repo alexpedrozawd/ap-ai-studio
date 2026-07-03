@@ -2,8 +2,7 @@ import os
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from jobs import job_output_path, job_upload_dir, launch, new_job
-from routes_faceswap import save_upload
+from jobs import finish, job_upload_dir, new_job, save_upload, set_output
 
 router = APIRouter()
 
@@ -23,11 +22,7 @@ async def create_removebg_job(
 	# output extension!". Forcar .png (pensando em transparencia) quebra pra qualquer
 	# entrada que nao seja .png. Mantemos a extensao original; se quiser transparencia
 	# de verdade, envie uma foto de origem ja' em .png.
-	output_path = job_output_path(job.id, f"{base}_sem_fundo{ext}")
-	job.output_path = output_path
+	output_path = set_output(job, f"{base}_sem_fundo{ext}")
 
 	extra_args = ["--target", target_path, "--output", output_path]
-	if dry_run:
-		extra_args += ["--dry-run"]
-	launch(job, extra_args)
-	return {"job_id": job.id}
+	return finish(job, extra_args, dry_run)

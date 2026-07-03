@@ -3,8 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from jobs import job_output_path, job_upload_dir, launch, new_job
-from routes_faceswap import save_upload
+from jobs import finish, job_upload_dir, new_job, save_upload, set_output
 
 router = APIRouter()
 
@@ -20,13 +19,9 @@ async def create_inpaint_job(
 	upload_dir = job_upload_dir(job.id)
 	source_path = await save_upload(upload_dir, source_image)
 	mask_path = await save_upload(upload_dir, mask_image)
-	output_path = job_output_path(job.id, "editado_" + os.path.basename(source_path))
-	job.output_path = output_path
+	output_path = set_output(job, "editado_" + os.path.basename(source_path))
 
 	extra_args = ["--source-image", source_path, "--mask-image", mask_path, "--output", output_path]
 	if prompt:
 		extra_args += ["--prompt", prompt]
-	if dry_run:
-		extra_args += ["--dry-run"]
-	launch(job, extra_args)
-	return {"job_id": job.id}
+	return finish(job, extra_args, dry_run)

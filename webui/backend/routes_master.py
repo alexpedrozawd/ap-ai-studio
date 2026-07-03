@@ -2,8 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from jobs import job_output_path, job_upload_dir, launch, new_job
-from routes_faceswap import save_upload
+from jobs import finish, job_upload_dir, new_job, save_upload, set_output
 
 router = APIRouter()
 
@@ -19,13 +18,9 @@ async def create_master_job(
 	upload_dir = job_upload_dir(job.id)
 	original_path = await save_upload(upload_dir, original)
 	processed_path = await save_upload(upload_dir, processed_video)
-	output_path = job_output_path(job.id, "video_final.mp4")
-	job.output_path = output_path
+	output_path = set_output(job, "video_final.mp4")
 
 	extra_args = ["--original", original_path, "--processed-video", processed_path, "--output", output_path]
 	if fps:
 		extra_args += ["--fps", str(fps)]
-	if dry_run:
-		extra_args += ["--dry-run"]
-	launch(job, extra_args)
-	return {"job_id": job.id}
+	return finish(job, extra_args, dry_run)

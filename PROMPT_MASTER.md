@@ -69,7 +69,7 @@ Aplicável somente quando a tarefa exigir mais do que troca de identidade facial
 
 **Nota de execução (Fase 4 real, CONCLUÍDA):** `-vsync` está deprecated no ffmpeg 6.1.1 instalado neste servidor — usar `-fps_mode cfr` no lugar. Comando final: dois inputs (`-i original -i processado`), vídeo vem do processado (`-map 1:v:0`), áudio/legendas/metadados vêm do original sem recodificar (`-map 0:a? -map 0:s? -c:a copy -c:s copy -map_metadata 0`, os `?` tornam opcional caso não exista). Testado ponta a ponta com um vídeo sintético (h264+AAC, título nos metadados) + o clipe real do Wan2.2: saída final confirmada via `ffprobe` com vídeo 1280×1280 do clipe processado, **24fps CFR**, matriz **bt709** nos três campos de cor, áudio AAC e metadados (`title`) preservados do original. **Achado importante durante o teste:** o `SaveAnimatedWEBP` nativo do ComfyUI gera um WebP animado que o demuxer do ffmpeg **não lê direito** (`skipping unsupported chunk: ANIM/ANMF`, decode falha) — troquei o nó final do workflow da Fase 3B de `SaveAnimatedWEBP` para `VHS_VideoCombine` (node pack `Kosinkadink/ComfyUI-VideoHelperSuite`, formato `video/h264-mp4`), que gera MP4 de verdade sem esse problema. Isso afeta a Fase 3B também — o clipe de teste gerado lá agora sai em `.mp4`, não `.webp`.
 
-**Fase 5 (pendente, pedido do usuário): Imagem para Vídeo (I2V)**
+**Fase 5 (pedido do usuário, CONCLUÍDA): Imagem para Vídeo (I2V)**
 Hoje o pipeline só faz **texto → vídeo** (T2V). O usuário pediu também **imagem → vídeo** (I2V) —
 animar uma foto existente, em vez de partir só de uma descrição em texto. Isso é o modo mais
 alinhado com o objetivo original do projeto (reencenar cenas/fotos de família), mas ainda não
@@ -225,19 +225,153 @@ pelo `run_vfx.py` real: música real gerada (5.94s, pedido de 6s), copiada pro c
    Demucs — a frase acima descrevia o estado *antes* da Fase 9 existir, mantida só pelo
    histórico de como o erro foi descoberto e corrigido.
 
+**Fase 11 (pedido do usuário, CONCLUÍDA): Atalhos de terminal e Interface Web**
+Duas camadas de acesso não-técnico construídas sobre o `run_vfx.py`, sem duplicar sua
+lógica: `vfx_aliases.sh` (funções de shell curtas, `vfx-rosto`/`vfx-video`/etc., chamam o
+interpretador certo pelo caminho absoluto do env — nunca `conda activate`/`conda run`,
+que tem bug de stdin) e `webui/` (FastAPI + React/TypeScript/Tailwind/Bootstrap),
+cobrindo as 10 funções do pipeline pelo navegador via Tailscale
+(`100.122.206.41:8299`, nunca `0.0.0.0`, sem `ufw allow`). Documentação operacional
+completa fica em `MANUAL_USO.md` (seções 10-11) — não duplicada aqui de propósito, esse
+documento cataloga decisões/achados, o manual ensina o uso do dia a dia.
+
+Decisão de arquitetura central: a webui não reimplementa os Gates nem fala direto com
+ComfyUI/FaceFusion — chama `run_vfx.py` como subprocesso (mesmo padrão dos atalhos), com
+`--auto-approve` e stdin alimentado com `"y"` pro Gate 3 (nunca pulável por design, ver
+Fase 3). `run_vfx.py` continua sendo a única fonte de verdade da lógica de segurança.
+
+**Achado real:** o modo `video` não aceitava `--output` (só logava onde o ComfyUI salvou
+o resultado, sem copiar pra lugar nenhum) — pré-requisito pra webui conseguir entregar o
+vídeo pro navegador de forma confiável. Corrigido reaproveitando `get_comfyui_output_file()`
+(já existia, usada por `inpaint`/`removebg`/etc. — só faltava o modo `video` também
+capturar o `history_entry` de `wait_for_comfyui_prompt()` e chamá-la). **Achado real #2
+(QA no navegador de verdade):** `StaticFiles(html=True)` sozinho não faz fallback de SPA —
+navegar direto pra uma sub-rota do React Router (ou dar F5 nela) devolvia 404. Resolvido
+com um catch-all em `main.py` que serve `index.html` pra qualquer rota que não seja
+`/api/*` e não bata com um arquivo estático real. **Achado real #3 (job real disparado
+pela API, não mock):** o `background_remover` do FaceFusion recusa rodar se a extensão de
+saída não for idêntica à de entrada (validação própria dele) — `routes_removebg.py`
+preserva a extensão original em vez de forçar `.png`.
+
+Exceção arquitetural: **dublagem não tem `--mode` dedicado no `run_vfx.py`** — a webui
+(`routes_dub.py`) e o atalho `vfx-dublar` chamam `facefusion.py headless-run
+--processors lip_syncer` diretamente, no ambiente Conda do FaceFusion, em vez de passar
+pelo orquestrador.
+
+**Auditoria de sistema (2026-07-02) e correções aplicadas na mesma sessão:** uma
+auditoria completa (documentação, arquitetura, código, estabilidade) encontrou este
+próprio documento desatualizado — contagem de testes errada e uma pendência de "não
+commitado" que já não era mais verdade (o repositório já estava commitado e no
+`origin/main`) — além de uma lista de lacunas reais de maturidade operacional,
+corrigidas em seguida:
+1. **`run_vfx.log` sem rotação** → `logging.handlers.RotatingFileHandler` (5MB × 5
+   backups); logs crus de boot do ComfyUI (`comfyui_boot.log`/`comfyui_video_mode.log`,
+   não passam por `logging.Logger`) truncados quando passam de 5MB.
+2. **Debris de 63 scopes `systemd --user` em estado `failed`** (sobra dos testes de
+   aceitação do Gate 1, que forçam OOM de propósito) → limpos com `systemctl --user
+   reset-failed`.
+3. **Sem supervisão de processo pra webui** (crash ou reboot exigia religar na mão) →
+   `webui/vfx-webui.service` (`systemd --user`, `Restart=on-failure`), instalável via
+   `vfx-web-enable`. **Ativado em produção em 2026-07-03** (exigiu confirmação explícita
+   do usuário — é uma mudança de persistência real, o sistema bloqueou a primeira
+   tentativa por ter sido feita sem consentimento genuíno, só um timeout). Testado ao
+   vivo de verdade: `kill -9` no processo → systemd religou sozinho em poucos segundos
+   (`Active: active (running)`, novo PID), sem precisar de intervenção manual. **ComfyUI
+   de propósito NÃO ganhou essa supervisão:** o modo `video` já mata e religa o ComfyUI
+   dentro da própria jaula de memória (`ensure_comfyui_running_under_jail`) toda vez que
+   roda — um serviço com auto-restart brigaria com isso (o systemd tentaria religar o
+   processo "solto" bem na hora que o `run_vfx.py` acabou de religar ele "preso"). Pra
+   ComfyUI, o botão Ligar/`vfx-ligar` continua sendo o jeito certo.
+4. **Upload multipart era salvo em disco antes do Gate 3 ter qualquer chance de checar
+   espaço livre, e sem limite de tamanho configurado** → middleware novo em
+   `webui/backend/main.py` que checa `Content-Length` e espaço livre em `/` *antes* de
+   aceitar o corpo da requisição.
+5. **Registro de jobs em memória (`JOBS`) crescia sem limite, uploads/resultados nunca
+   eram limpos automaticamente** → `cleanup_old_jobs()` (retenção de 7 dias), rodando
+   uma vez na subida do processo (varre sobras de antes de um restart) e depois a cada
+   6h.
+6. **Duplicação quase idêntica nas 9 rotas de criação de job** → extraídos `finish()`/
+   `set_output()`/`save_upload()` únicos em `webui/backend/jobs.py`, reaproveitados por
+   todas as rotas.
+7. **`tts_synthesize.py`/`demucs_separate.py` sem nenhum teste real** (só havia teste do
+   comando que o `run_vfx.py` monta pra chamá-los) → `test_standalone_scripts.py`,
+   subprocesso real dos dois scripts, cobrindo os caminhos de validação alcançáveis sem
+   precisar da GPU/dos modelos pesados instalados.
+8. **Frontend sem nenhum teste automatizado** → Vitest + React Testing Library
+   (`webui/frontend/src/**/*.test.tsx`), cobrindo o painel de log/status de job e a
+   validação de formulário de pelo menos uma página.
+
+**Achado de compatibilidade (Node 18.19.1 instalado, mais antigo que o que os pacotes
+mais recentes esperam):** `create-vite` mais novo, `tailwindcss` v4 e `vitest` v4 falham
+em tempo de execução (não só aviso `EBADENGINE`) porque usam `node:util.styleText`,
+disponível só a partir do Node ~20. Fixado em versões compatíveis: `create-vite@5`,
+`tailwindcss@^3.4`, `vitest@^1.6` + `jsdom@^24`. Atualizar o Node do sistema resolveria
+de raiz, mas está fora de escopo por ora (ver regra de não travar atualização de SO,
+Fase 0) — revisitar se algum pacote futuro exigir Node mais novo de novo.
+
+**Varredura de segurança (2026-07-03) — 1 achado crítico real, explorado e corrigido ao
+vivo:** com a webui já rodando em produção (supervisionada pelo systemd), uma segunda
+auditoria com foco em QA/Cybersecurity encontrou e corrigiu 3 falhas, todas confirmadas
+por exploração real contra o servidor rodando (não análise teórica) e reexploradas
+depois da correção pra confirmar que fecharam:
+
+1. **CRÍTICO — leitura arbitrária de arquivo (path traversal) na rota catch-all da
+   SPA.** `main.py` montava `os.path.join(STATIC_DIR, full_path)` com `full_path` vindo
+   direto da URL, sem checar `..`. **Exploração real confirmada:** `GET
+   /%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd` (pontos url-encoded pra não
+   serem normalizados pelo cliente HTTP antes de sair) devolveu o conteúdo real de
+   `/etc/passwd` do servidor — qualquer dispositivo na Tailscale conseguiria ler
+   qualquer arquivo legível pelo usuário `ap` (potencialmente chaves SSH, código-fonte,
+   o próprio baseline de segurança do servidor), sem autenticação nenhuma, já que a
+   webui não tem login por decisão (ver seção 11 do `MANUAL_USO.md`). **Corrigido** com
+   `os.path.realpath()` + contenção via `os.path.commonpath()` em
+   `_safe_static_path()` — só serve o arquivo se ele continuar dentro de `STATIC_DIR`
+   depois de resolvido. Reexplorado o mesmo payload após a correção: cai limpo no
+   `index.html`, sem vazar nada. Testes de regressão em `test_backend.py`
+   (`test_spa_catchall_rejects_*`).
+2. **MÉDIO — limite de tamanho de upload contornável.** O middleware de `main.py` só
+   olhava o cabeçalho `Content-Length`. **Confirmado ao vivo** (`curl -H
+   "Transfer-Encoding: chunked"`) que um cliente pode omitir esse cabeçalho e passar
+   direto pela checagem, sem declarar tamanho nenhum. **Corrigido:** `save_upload()`
+   (`jobs.py`) agora conta os bytes de verdade enquanto grava o arquivo em disco e
+   aborta sozinho (413) ao ultrapassar `MAX_UPLOAD_BYTES`, independente do que o
+   cliente declarou ou deixou de declarar no cabeçalho.
+3. **BAIXO — crash não tratado (500) com filename `".."`.** `os.path.basename("..")`
+   devolve `".."` sem mudança (não tem separador pra remover) — um upload com esse
+   filename exato virava `os.path.join(dest_dir, "..")`, apontando pro diretório pai, e
+   `open(..., "wb")` derrubava com `IsADirectoryError` não tratada. **Não é um escape
+   de verdade** (só sobe um nível, ainda dentro da própria árvore de
+   `webui_uploads/`), mas é entrada não validada quebrando a aplicação — confirmado ao
+   vivo via `journalctl` (traceback real capturado). **Corrigido:** `save_upload()`
+   rejeita explicitamente `""`/`"."`/`".."` com 400 limpo antes de chegar no `open()`.
+
+**Observação registrada, não corrigida (fora do modelo de ameaça atual):** não há
+limite de jobs simultâneos — qualquer dispositivo na Tailscale pode disparar vários
+jobs pesados ao mesmo tempo (os Gates do `run_vfx.py` ainda protegem RAM/VRAM/disco
+individualmente, mas nada impede várias execuções concorrentes). Consistente com a
+decisão já tomada de não ter autenticação (mesmo padrão do ComfyUI/FaceFusion Gradio) —
+não é uma falha nova, só um lembrete caso um limite de concorrência vire prioridade no
+futuro.
+
+Serviço reiniciado (`systemctl --user restart vfx-webui.service`) após cada uma das 3
+correções, com reexploração ao vivo confirmando o fechamento antes de seguir pra
+próxima. 109 testes no total após esta rodada (103 + 6 novos: 3 de path traversal + 2 de
+filename inválido + 1 de limite via streaming, ver tabela abaixo).
+
 ---
 
-**Referência rápida (consolidada Fases 0-10, verificada ao vivo em 2026-07-02):**
+**Referência rápida (consolidada Fases 0-11, verificada ao vivo em 2026-07-03, pós-auditoria + varredura de segurança):**
 Esta seção não substitui o histórico acima — é só um resumo de "onde as coisas estão"
 pra não precisar garimpar os achados de cada fase toda vez.
 
-*Ambientes Conda (4, isolados por conflito real de dependência, não por preferência):*
+*Ambientes Conda (5, isolados por conflito real de dependência, não por preferência):*
 | Ambiente | Usado por | Motivo do isolamento |
 |---|---|---|
 | `vfx-pipeline` | ComfyUI (T2V/I2V, inpaint, remoção de fundo via node, música) | Base — torch 2.12.1+cu130 |
 | `facefusion-pipeline` | FaceFusion (`faceswap`, `removebg`, `lip_syncer`/dublagem) | `numpy==2.2.1` fixo, colide com ComfyUI |
 | `tts-pipeline` | `tts_synthesize.py` (XTTS-v2) | exige `transformers==4.57.6` exato |
 | `noise-pipeline` | `demucs_separate.py` (Demucs) | precisa torch 2.12.1+cu130 + `torchcodec` |
+| `webui-pipeline` | `webui/backend/` (FastAPI/uvicorn) | Só `fastapi`/`uvicorn`/`aiohttp` — não precisa do torch pesado do `vfx-pipeline` |
 
 *Modos do `run_vfx.py` (`--mode`, ver `build_parser()` em `run_vfx.py:1438`):*
 | `--mode` | O que faz | Flags relevantes |
@@ -258,14 +392,22 @@ pra não precisar garimpar os achados de cada fase toda vez.
 - `frame_interpolation/rife_v4.25.safetensors` (22MB)
 - `upscale_models/RealESRGAN_x4plus.pth` (64MB)
 - `checkpoints/sd_xl_base_1.0_inpainting_0.1.safetensors` (6.5GB)
-- Disco (`/`, NVMe compartilhado com o SO): 339GB usados / 106GB livres de 468GB (77%) em 2026-07-02.
+- Disco (`/`, NVMe compartilhado com o SO): 340GB usados / 105GB livres de 468GB (77%) em 2026-07-03.
 
-*Testes:* `test_run_vfx.py`, 57 testes (mix de unitários e funcionais reais — ex. ffmpeg de
-verdade cortando vídeo, OOM-kill real via `systemd-run`), todos passando.
+*Testes (109 no total, todos passando, verificado ao vivo em 2026-07-03 pós-varredura de segurança):*
+| Suite | Testes | O que cobre |
+|---|---|---|
+| `test_run_vfx.py` | 62 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`) |
+| `test_standalone_scripts.py` | 6 | `tts_synthesize.py`/`demucs_separate.py` via subprocesso real (validação de argumentos, sem precisar da GPU/modelos) |
+| `webui/backend/test_backend.py` | 34 | Contrato de API, jobs reais com `--dry-run` via subprocesso real, middleware de limite de upload/disco, limpeza automática, path traversal na SPA, validação de filename, limite de upload via streaming |
+| `webui/frontend/src/**/*.test.tsx` | 7 | Vitest + React Testing Library — painel de log/status de job, validação de formulário |
 
-*Pendência conhecida:* todo o trabalho das Fases 5-10 (`run_vfx.py`, `test_run_vfx.py`,
-`tts_synthesize.py`, `demucs_separate.py`, este documento) está **não commitado** — só o
-commit `00e41fb` (Fases 0-4) foi enviado ao `origin/main`. Combinado com o usuário: só
-commitar quando ele confirmar que está tudo certo.
+*Estado do repositório:* as correções da auditoria de sistema e da varredura de
+segurança (2026-07-02/03 — supervisão systemd, limites de upload/disco, limpeza
+automática, refactor das rotas, testes novos, e as 3 falhas de segurança corrigidas)
+ainda **não foram commitadas** (`git diff origin/main` não está vazio em 2026-07-03) —
+combinado com o usuário: só commitar quando ele confirmar que está tudo certo. O
+`origin/main` continua no commit `35dc3d0` (Fases 0-11 completas, sem os achados desta
+rodada).
 
 [FIM DO PROMPT - ARQUITETURA FAIL-SAFE]

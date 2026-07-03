@@ -8,6 +8,7 @@ import aiohttp
 from fastapi import APIRouter
 
 from config import COMFYUI_DIR, COMFYUI_HOST, COMFYUI_PORT, VFX_PY
+from utils import truncate_log_if_large
 
 router = APIRouter()
 
@@ -53,6 +54,7 @@ async def start_comfyui():
 		return {"already_running": True}
 	log_path = "/home/ap/ai_pipeline/logs/comfyui_boot.log"
 	os.makedirs(os.path.dirname(log_path), exist_ok=True)
+	truncate_log_if_large(log_path)
 	with open(log_path, "ab") as log_file:
 		await asyncio.create_subprocess_exec(
 			VFX_PY, "main.py", "--port", str(COMFYUI_PORT), "--listen", COMFYUI_HOST,

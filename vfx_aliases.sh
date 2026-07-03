@@ -19,8 +19,9 @@ COMFYUI_DIR="/home/ap/ai_pipeline/ComfyUI"
 COMFYUI_HOST="127.0.0.1"
 COMFYUI_PORT="8288"
 WEBUI_PY="/home/ap/miniconda3/envs/webui-pipeline/bin/python"
-WEBUI_BACKEND_DIR="$VFX_DIR/webui/backend"
-WEBUI_FRONTEND_DIR="$VFX_DIR/webui/frontend"
+WEBUI_DIR="$VFX_DIR/webui"
+WEBUI_BACKEND_DIR="$WEBUI_DIR/backend"
+WEBUI_FRONTEND_DIR="$WEBUI_DIR/frontend"
 WEBUI_HOST="100.122.206.41"
 WEBUI_PORT="8299"
 COMFYUI_LOG="/home/ap/ai_pipeline/logs/comfyui_boot.log"
@@ -178,6 +179,39 @@ vfx-web() {
 	(cd "$WEBUI_BACKEND_DIR" && "$WEBUI_PY" -m uvicorn main:app --host "$WEBUI_HOST" --port "$WEBUI_PORT")
 }
 
+# --- supervisao via systemd --user (achado de auditoria: sem isso, um crash ou reboot
+# exigia entrar via SSH e rodar 'vfx-web' na mao de novo). So' cobre a webui - o ComfyUI
+# de proposito NAO ganha essa supervisao: o modo video (run_vfx.py) mata e religa o
+# ComfyUI dentro da propria jaula de memoria sempre que roda (ensure_comfyui_running_
+# under_jail), e um servico systemd com Restart=on-failure brigaria com isso (o systemd
+# tentaria religar o processo "solto" bem na hora que o run_vfx.py acabou de religar
+# ele "preso"). Pra ComfyUI, o botao Ligar/vfx-ligar continua sendo o jeito certo.
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+WEBUI_SERVICE_NAME="vfx-webui.service"
+WEBUI_SERVICE_SRC="$WEBUI_DIR/vfx-webui.service"
+
+vfx-web-enable() {
+	if [ ! -f "$WEBUI_BACKEND_DIR/static/index.html" ]; then
+		echo "Frontend ainda nao foi buildado."
+		vfx-web-build || { echo "Build falhou - confira o erro acima."; return 1; }
+	fi
+	mkdir -p "$SYSTEMD_USER_DIR"
+	cp "$WEBUI_SERVICE_SRC" "$SYSTEMD_USER_DIR/$WEBUI_SERVICE_NAME"
+	systemctl --user daemon-reload
+	systemctl --user enable --now "$WEBUI_SERVICE_NAME"
+	echo "Interface web supervisionada pelo systemd (reinicia sozinha se cair)."
+	echo "Ver status: vfx-web-status | Desligar de vez: vfx-web-disable"
+}
+
+vfx-web-disable() {
+	systemctl --user disable --now "$WEBUI_SERVICE_NAME" 2>/dev/null
+	echo "Supervisao da interface web desligada."
+}
+
+vfx-web-status() {
+	systemctl --user status "$WEBUI_SERVICE_NAME" --no-pager
+}
+
 vfx-ajuda() {
 	cat <<'EOF'
 AP AI Studio - atalhos disponiveis (padrao: nome curto + argumentos obrigatorios)
@@ -186,8 +220,11 @@ AP AI Studio - atalhos disponiveis (padrao: nome curto + argumentos obrigatorios
   vfx-ligar                                         liga o ComfyUI (necessario p/ vfx-editar e vfx-musica)
   vfx-parar                                         desliga o ComfyUI
 
-  vfx-web                                           liga a interface web (Tailscale, porta 8299)
+  vfx-web                                           liga a interface web em primeiro plano (Ctrl+C para parar)
   vfx-web-build                                     rebuilda o frontend da interface web (apos mudancas)
+  vfx-web-enable                                    liga a interface web supervisionada (reinicia sozinha se cair/reiniciar)
+  vfx-web-disable                                   desliga a supervisao da interface web
+  vfx-web-status                                    mostra o status do servico supervisionado
 
   vfx-rosto <origem> <alvo> <saida>                troca de rosto (foto/video; some --chunk-seconds N p/ video longo)
   vfx-video "<prompt>"                              gera video do zero (texto -> video)

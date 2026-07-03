@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import glob
 import logging
+import logging.handlers
 import os
 import resource
 import shutil
@@ -78,6 +79,20 @@ def check_port_free(port: int, host: str = "127.0.0.1") -> bool:
 
 # --- Logging persistente ---
 
+LOG_TRUNCATE_THRESHOLD_BYTES = 5 * 1024 * 1024
+
+
+def truncate_log_if_large(log_path: str, threshold_bytes: int = LOG_TRUNCATE_THRESHOLD_BYTES) -> None:
+	"""Pros logs de boot do ComfyUI (redirecionamento cru de stdout/stderr de subprocesso,
+	nao um logging.Logger) - RotatingFileHandler nao se aplica aqui. Truncamento simples
+	em vez de rotacao com backups, suficiente pra um log de diagnostico de boot."""
+	try:
+		if os.path.isfile(log_path) and os.path.getsize(log_path) > threshold_bytes:
+			open(log_path, "w").close()
+	except OSError:
+		pass  # nao vale travar a subida do ComfyUI por causa de um log de diagnostico
+
+
 def setup_logger(log_path: str = LOG_PATH, dry_run: bool = False) -> logging.Logger:
 	logger = logging.getLogger("run_vfx")
 	logger.setLevel(logging.INFO)
@@ -85,7 +100,10 @@ def setup_logger(log_path: str = LOG_PATH, dry_run: bool = False) -> logging.Log
 	fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 	if not dry_run:
 		os.makedirs(os.path.dirname(log_path), exist_ok=True)
-		fh = logging.FileHandler(log_path)
+		# Achado de auditoria: sem rotacao, run_vfx.log cresce pra sempre (disco
+		# compartilhado com o SO, ver Fase 1). 5MB x 5 arquivos de backup e' generoso
+		# pro volume de log deste pipeline (cada job gera algumas dezenas de linhas).
+		fh = logging.handlers.RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024, backupCount=5)
 		fh.setFormatter(fmt)
 		logger.addHandler(fh)
 	sh = logging.StreamHandler(sys.stdout)
@@ -461,6 +479,7 @@ async def ensure_comfyui_running_under_jail(
 	conda_python = os.path.expanduser(f"~/miniconda3/envs/{conda_env}/bin/python")
 	log_path = os.path.join(PIPELINE_PATH, "logs", "comfyui_video_mode.log")
 	os.makedirs(os.path.dirname(log_path), exist_ok=True)
+	truncate_log_if_large(log_path)
 
 	systemd_cmd = [
 		"systemd-run", "--user", "--scope", "--unit", COMFYUI_SCOPE_UNIT,
