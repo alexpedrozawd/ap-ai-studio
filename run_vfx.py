@@ -232,7 +232,9 @@ async def orchestrate(args: argparse.Namespace, logger: logging.Logger) -> int:
 			)
 		staged_image = stage_image_for_comfyui(args.source_image)
 		staged_mask = stage_image_for_comfyui(args.mask_image)
-		await poll_comfyui_system_stats(logger=logger, timeout=60.0)
+		await ensure_comfyui_running_under_jail(
+			memory_max=memory_cfg["memory_max"], memory_swap_max=memory_cfg["memory_swap_max"], logger=logger,
+		)
 		workflow = build_inpaint_workflow(
 			image_filename=staged_image,
 			mask_filename=staged_mask,
@@ -308,7 +310,9 @@ async def orchestrate(args: argparse.Namespace, logger: logging.Logger) -> int:
 			logger.error("Modo music requer --prompt e --output")
 			return 1
 		ensure_comfyui_audio_output_dir()
-		await poll_comfyui_system_stats(logger=logger, timeout=60.0)
+		await ensure_comfyui_running_under_jail(
+			memory_max=memory_cfg["memory_max"], memory_swap_max=memory_cfg["memory_swap_max"], logger=logger,
+		)
 		workflow = build_musicgen_workflow(prompt=args.prompt, duration=args.music_duration)
 		prompt_id = await submit_comfyui_prompt(workflow, logger=logger)
 		# Achado real: MusicGenAudioToFile nao registra o arquivo em entry["outputs"] do jeito
@@ -337,7 +341,9 @@ async def orchestrate(args: argparse.Namespace, logger: logging.Logger) -> int:
 		if not os.path.isfile(args.target):
 			logger.error(f"--target nao encontrado: {args.target}")
 			return 1
-		await poll_comfyui_system_stats(logger=logger, timeout=60.0)
+		await ensure_comfyui_running_under_jail(
+			memory_max=memory_cfg["memory_max"], memory_swap_max=memory_cfg["memory_swap_max"], logger=logger,
+		)
 		staged = stage_image_for_comfyui(args.target)
 		is_video = is_video_file(args.target)
 		workflow = build_upscale_workflow(staged_filename=staged, is_video=is_video, output_fps=args.fps)

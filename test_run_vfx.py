@@ -565,9 +565,9 @@ def test_inpaint_mode_passes_controlnet_flags_through_to_workflow(monkeypatch):
 	"""--use-depth-controlnet e --controlnet-strength no CLI chegam ate build_inpaint_workflow."""
 	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
 
-	async def fake_poll_comfyui_system_stats(*args, **kwargs):
+	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
 		return None
-	monkeypatch.setattr("run_vfx.poll_comfyui_system_stats", fake_poll_comfyui_system_stats)
+	monkeypatch.setattr("run_vfx.ensure_comfyui_running_under_jail", fake_ensure_comfyui_running_under_jail)
 
 	captured_kwargs = {}
 	real_build_inpaint_workflow = build_inpaint_workflow
@@ -604,6 +604,123 @@ def test_inpaint_mode_passes_controlnet_flags_through_to_workflow(monkeypatch):
 	assert rc == 0
 	assert captured_kwargs["use_depth_controlnet"] is True
 	assert captured_kwargs["controlnet_strength"] == 0.9
+
+
+def test_inpaint_mode_uses_comfyui_memory_jail_not_bare_poll(monkeypatch):
+	"""Achado real de auditoria: so' o modo video chamava ensure_comfyui_running_under_jail()
+	- inpaint/music/upscale so' chamavam poll_comfyui_system_stats() (que so' espera o ComfyUI
+	responder, sem garantir NENHUMA jaula de memoria do Gate 1). Se o ComfyUI foi ligado pela
+	webui (POST /api/comfyui/start, subprocesso sem jaula), esses 3 modos rodavam sem protecao
+	nenhuma contra OOM. Este teste confirma que o modo inpaint agora passa pela jaula."""
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+
+	jail_calls = []
+
+	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
+		jail_calls.append(kwargs)
+	monkeypatch.setattr("run_vfx.ensure_comfyui_running_under_jail", fake_ensure_comfyui_running_under_jail)
+
+	async def fake_submit_comfyui_prompt(workflow, logger=None):
+		return "fake-prompt-id"
+	monkeypatch.setattr("run_vfx.submit_comfyui_prompt", fake_submit_comfyui_prompt)
+
+	async def fake_wait_for_comfyui_prompt(prompt_id, logger=None, timeout=600.0):
+		return {"outputs": {"save": {"images": [{"filename": "x.png", "subfolder": ""}]}}}
+	monkeypatch.setattr("run_vfx.wait_for_comfyui_prompt", fake_wait_for_comfyui_prompt)
+
+	monkeypatch.setattr("run_vfx.get_comfyui_output_file", lambda history_entry: __file__)
+	monkeypatch.setattr("shutil.copy", lambda src, dst: None)
+
+	with tempfile.NamedTemporaryFile(suffix=".png") as source_image, tempfile.NamedTemporaryFile(suffix=".png") as mask_image:
+		args = build_parser().parse_args([
+			"--mode", "inpaint", "--auto-approve",
+			"--source-image", source_image.name,
+			"--mask-image", mask_image.name,
+			"--output", "/tmp/nao_deveria_ser_usado.png",
+		])
+		logger = logging.getLogger("test-inpaint-memory-jail")
+		logger.addHandler(logging.NullHandler())
+		rc = asyncio.run(orchestrate(args, logger))
+
+	assert rc == 0
+	assert len(jail_calls) == 1
+	assert "memory_max" in jail_calls[0] and "memory_swap_max" in jail_calls[0]
+
+
+def test_music_mode_uses_comfyui_memory_jail_not_bare_poll(monkeypatch):
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+
+	jail_calls = []
+
+	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
+		jail_calls.append(kwargs)
+	monkeypatch.setattr("run_vfx.ensure_comfyui_running_under_jail", fake_ensure_comfyui_running_under_jail)
+
+	monkeypatch.setattr("run_vfx.ensure_comfyui_audio_output_dir", lambda: None)
+
+	async def fake_submit_comfyui_prompt(workflow, logger=None):
+		return "fake-prompt-id"
+	monkeypatch.setattr("run_vfx.submit_comfyui_prompt", fake_submit_comfyui_prompt)
+
+	async def fake_wait_for_comfyui_prompt(prompt_id, logger=None, timeout=300.0):
+		return {}
+	monkeypatch.setattr("run_vfx.wait_for_comfyui_prompt", fake_wait_for_comfyui_prompt)
+
+	audio_dir = os.path.join(COMFYUI_DIR, "output", "audio")
+	os.makedirs(audio_dir, exist_ok=True)
+	generated_path = os.path.join(audio_dir, "musicgen_resultado_test_jail.wav")
+	with open(generated_path, "wb") as f:
+		f.write(b"fake-wav-bytes")
+
+	try:
+		args = build_parser().parse_args([
+			"--mode", "music", "--auto-approve",
+			"--prompt", "teste", "--output", "/tmp/nao_deveria_ser_usado.wav",
+		])
+		logger = logging.getLogger("test-music-memory-jail")
+		logger.addHandler(logging.NullHandler())
+		rc = asyncio.run(orchestrate(args, logger))
+	finally:
+		os.remove(generated_path)
+
+	assert rc == 0
+	assert len(jail_calls) == 1
+	assert "memory_max" in jail_calls[0] and "memory_swap_max" in jail_calls[0]
+
+
+def test_upscale_mode_uses_comfyui_memory_jail_not_bare_poll(monkeypatch, tmp_path):
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+
+	jail_calls = []
+
+	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
+		jail_calls.append(kwargs)
+	monkeypatch.setattr("run_vfx.ensure_comfyui_running_under_jail", fake_ensure_comfyui_running_under_jail)
+
+	async def fake_submit_comfyui_prompt(workflow, logger=None):
+		return "fake-prompt-id"
+	monkeypatch.setattr("run_vfx.submit_comfyui_prompt", fake_submit_comfyui_prompt)
+
+	async def fake_wait_for_comfyui_prompt(prompt_id, logger=None, timeout=1800.0):
+		return {"outputs": {"save": {"images": [{"filename": "x.png", "subfolder": ""}]}}}
+	monkeypatch.setattr("run_vfx.wait_for_comfyui_prompt", fake_wait_for_comfyui_prompt)
+
+	monkeypatch.setattr("run_vfx.get_comfyui_output_file", lambda history_entry: __file__)
+	monkeypatch.setattr("shutil.copy", lambda src, dst: None)
+
+	target = tmp_path / "foto.jpg"
+	target.write_bytes(b"fake-jpg-bytes")
+	args = build_parser().parse_args([
+		"--mode", "upscale", "--auto-approve",
+		"--target", str(target), "--output", str(tmp_path / "saida.jpg"),
+	])
+	logger = logging.getLogger("test-upscale-memory-jail")
+	logger.addHandler(logging.NullHandler())
+	rc = asyncio.run(orchestrate(args, logger))
+
+	assert rc == 0
+	assert len(jail_calls) == 1
+	assert "memory_max" in jail_calls[0] and "memory_swap_max" in jail_calls[0]
 
 
 def test_video_mode_copies_comfyui_output_when_output_flag_given(monkeypatch, tmp_path):

@@ -528,6 +528,96 @@ profissional, cada uma com nota própria — e correções aplicadas em seguida:
     deriva pequena mas real antes). A costura visual também ficou mais suave no mesmo
     teste. Ambos os nodes (`FeatherMask`, `ImageCompositeMasked`) já existem no
     ComfyUI core — nenhuma dependência nova.
+16. **Gate 1 (jaula de memória) não era aplicado ao ComfyUI em 3 dos 4 modos que o
+    usam** (achado real da auditoria final, pós-commit/push) — investigando por que
+    `vfx-webui.service` mostrava 14GB de memória no `systemctl status`, descobri que o
+    ComfyUI ligado pela webui (`POST /api/comfyui/start`, em `routes_status.py`) roda
+    como subprocesso direto do FastAPI, **sem nenhum `systemd-run --scope`** — nasce
+    dentro do próprio cgroup do `vfx-webui.service`, não num scope isolado. Isso por si
+    só é esperado (essa rota nunca teve jaula, é só um "liga rápido" pra abrir a
+    interface). O problema real: dos 4 modos do `run_vfx.py` que dependem do ComfyUI
+    (`video`, `inpaint`, `music`, `upscale`), **só o `video`** chamava
+    `ensure_comfyui_running_under_jail()` (que verifica se já está no scope certo e,
+    se não estiver, mata e religa preso). Os outros 3 só chamavam
+    `poll_comfyui_system_stats()` — que espera o ComfyUI responder, mas não verifica
+    nem aplica jaula nenhuma. Ou seja: o Gate 1 calculava um limite de memória e até
+    pedia confirmação nesses 3 modos, mas **esse limite nunca chegava a valer** pro
+    processo que faz o trabalho pesado de verdade. Se o ComfyUI tivesse sido ligado
+    pela webui (o caminho mais comum no dia a dia) e o usuário rodasse `inpaint`/
+    `music`/`upscale` na sequência, o servidor inteiro ficava exposto a um OOM sem
+    a proteção que o Gate 1 existe pra dar — exatamente o cenário de thrashing que a
+    jaula foi criada pra evitar (ver Fase 3B/vfx_comfyui.py).
+
+    **Corrigido:** as 3 chamadas de `poll_comfyui_system_stats()` viraram
+    `ensure_comfyui_running_under_jail()` (que já inclui a espera de prontidão
+    internamente, então nenhum comportamento externo muda). 3 testes novos confirmam
+    que cada um dos 3 modos chama a jaula, não só o poll — antes desta correção,
+    nenhum teste pegava essa lacuna porque os mocks nunca verificavam qual das duas
+    funções cada modo realmente chamava.
+
+    **Verificado ao vivo, no cenário exato do achado:** com o ComfyUI já rodando sem
+    jaula (aninhado em `vfx-webui.service`, confirmado via `systemctl status`), rodei
+    `--mode upscale` de verdade — o log mostrou `"Encerrando instancia do ComfyUI fora
+    da jaula (porta 8288 ocupada) antes de reiniciar presa"` seguido de `"ComfyUI
+    reiniciado sob jaula de memoria (scope=vfx-comfyui-video.scope, MemoryMax=24G...)"`.
+    Confirmado depois via `systemctl status vfx-comfyui-video.scope`: processo isolado
+    no scope certo, `Memory: ... (max: 24.0G ...)` aplicado de verdade pelo systemd.
+    `vfx-webui.service` voltou a mostrar memória normal (o "14GB" de antes era quase
+    todo `file` cache reaproveitável do próprio processo, não `anon` real - confirmado
+    via `memory.stat` do cgroup, `anon: 44MB` - não era um vazamento, mas a
+    investigação valeu a pena porque revelou o achado real acima).
+
+    Limpeza cosmética junto: `vfx-comfyui-video.scope` aparecia como `failed` no
+    `systemctl --user list-units --all` (resíduo de uma sessão anterior) — resolvido
+    com `systemctl --user reset-failed`.
+17. **Processamento em lote estendido pra "Trocar Rosto" e "Limpar Áudio"** — o
+    `BatchJobQueue.tsx` (item #10 acima) só cobria Aumentar Resolução/Remover Fundo
+    (1 arquivo entra, 1 sai, imagem/vídeo). Avaliei estender pros outros modos e decidi
+    o escopo assim:
+    - **Trocar Rosto:** viável — a foto de origem (rosto) fica fixa, só o alvo varia
+      em lote. Exigiu generalizar `BatchJobQueue` (ver abaixo), já que a origem não é
+      um dos arquivos do lote.
+    - **Limpar Áudio:** viável, formato igual ao Upscale/RemoveBg (1 arquivo, 1 saída
+      — só que áudio, não imagem/vídeo).
+    - **Editar Imagem (inpaint):** avaliado e descartado por ora — cada item do lote
+      precisaria de 2 arquivos pareados (foto + máscara), e a UI de seleção múltipla
+      de hoje não sabe casar "foto 3" com "máscara 3". Exigiria uma UI de pares, não
+      só um campo de arquivo múltiplo — fora de escopo desta rodada.
+    - **Gerar Vídeo / Música:** avaliado e descartado — já são os modos mais lentos do
+      pipeline (minutos por item); enfileirar vários pioraria a espera sem ganho
+      prático claro.
+    - **Voz (TTS) / Dublagem:** avaliado e descartado — TTS varia principalmente por
+      **texto**, não por arquivo (a amostra de voz é fixa, não o que varia em lote);
+      não se encaixa no formato "vários arquivos" do componente sem redesenhar a UI.
+      Dublagem tem o mesmo problema de pares do inpaint (áudio + vídeo por item).
+    - **Masterizar:** não se aplica — sempre um par específico (vídeo processado +
+      original correspondente), não um "lote de arquivos soltos".
+
+    **`BatchJobQueue.tsx` generalizado:** trocou os props `isVideo`/`resultLabel`/
+    `jobOutputUrl` (que assumiam sempre antes/depois de imagem via
+    `BeforeAfterCompare`) por uma única função `renderResult(file, job)` fornecida por
+    cada página — o componente cuida só da fila/sequenciamento, cada página decide
+    como mostrar seu próprio resultado (antes/depois de imagem no Upscale/RemoveBg/
+    FaceSwap, player de áudio + download no Limpar Áudio). Testado ao vivo: 2 jobs
+    reais de Trocar Rosto (mesma origem, alvos diferentes) via `curl`, sequenciais,
+    ambos concluídos; verificação visual real com Chrome headless confirmando a fila
+    de Trocar Rosto renderizando certo no navegador (2/2 concluídos, log e badges
+    corretos por item).
+18. **`friendlyErrors.ts` estendido pras outras 5 funções do pipeline** — cobria só
+    Gates/OOM/ComfyUI; agora também FaceFusion (troca de rosto), remoção de fundo,
+    TTS, Demucs (limpar áudio), FFmpeg (masterização) e modelo/arquivo ausente
+    (`FileNotFoundError` de `.safetensors`/`.pth`/`.ckpt`/`.bin`). Os 5 padrões novos
+    de "ferramenta falhou" usam o formato **exato** dos logs reais — confirmado via
+    `grep 'logger.error(f"' run_vfx.py` antes de escrever cada regex, não um palpite
+    sobre como a mensagem provavelmente seria. Mensagens propositalmente genéricas
+    (ex.: "verifique o formato do arquivo") em vez de apontar uma causa específica que
+    eu não tenho como confirmar de antemão (ex.: não afirmo que foi o filtro de idade
+    do FaceFusion que rejeitou um rosto, porque não tenho o texto exato desse cenário
+    específico) — mantém a regra de não inventar. Verificação: 7 testes novos com o
+    texto de log real de cada cenário (não forcei os 5 erros ao vivo contra o
+    servidor, já que o texto do log é o mesmo já confirmado por grep, e as 3 falhas
+    reais anteriores — Gates/OOM/ComfyUI — já foram verificadas ao vivo em rodadas
+    passadas).
 
 **Nota registrada, não uma ação (achado do perfil SO/DevOps + uso profissional):** o
 teto de `MAX_VIDEO_WIDTH`/`MAX_VIDEO_HEIGHT` = 720×720 em `vfx_config.py` existe porque
@@ -590,13 +680,13 @@ pra não precisar garimpar os achados de cada fase toda vez.
   exige `sudo`, que este agente não tem configurado sem senha; comando pra o usuário
   rodar se quiser completar: `sudo flatpak uninstall net.lutris.Lutris`.
 
-*Testes (160 no total, todos passando, verificado ao vivo em 2026-07-03 pós correção da costura de mascara no inpaint):*
+*Testes (175 no total, todos passando, verificado ao vivo em 2026-07-03 pós mensagens de erro amigáveis estendidas):*
 | Suite | Testes | O que cobre |
 |---|---|---|
-| `test_run_vfx.py` | 74 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`). Roda contra os 7 módulos `vfx_*.py` via `run_vfx.py` (reexport). Inclui 6 testes do `--mode upscale`, 2 do `--blocks-to-swap`, 3 do ControlNet Depth no inpaint e 1 do feathering/composição da máscara. |
+| `test_run_vfx.py` | 77 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`). Roda contra os 7 módulos `vfx_*.py` via `run_vfx.py` (reexport). Inclui 6 testes do `--mode upscale`, 2 do `--blocks-to-swap`, 3 do ControlNet Depth no inpaint, 1 do feathering/composição da máscara e 3 confirmando que `inpaint`/`music`/`upscale` usam a jaula de memória do ComfyUI (não só o poll). |
 | `test_standalone_scripts.py` | 6 | `tts_synthesize.py`/`demucs_separate.py` via subprocesso real (validação de argumentos, sem precisar da GPU/modelos) |
 | `webui/backend/test_backend.py` | 44 | Contrato de API, jobs reais com `--dry-run` via subprocesso real, middleware de limite de upload/disco, limpeza automática, path traversal na SPA, validação de filename, limite de upload via streaming, validação de assinatura real do arquivo, job "fantasma" em upload multi-arquivo, rota `/jobs/upscale`, rota `/jobs/inpaint` com ControlNet |
-| `webui/frontend/src/**/*.test.tsx` | 36 | Vitest + React Testing Library — painel de log/status de job, validação de formulário, `BeforeAfterCompare.tsx` isolado (4 testes), estado "job concluído" nas 4 páginas com antes/depois (14 testes), `friendlyErrors.ts` (7 testes) + mensagem amigável no `JobLogPanel` (2 testes), `BatchJobQueue.tsx` isolado (3 testes) + modo lote em `UpscalePage`/`RemoveBgPage` (2 testes), checkbox de ControlNet no `InpaintPage` (1 teste) |
+| `webui/frontend/src/**/*.test.tsx` | 48 | Vitest + React Testing Library — painel de log/status de job, validação de formulário, `BeforeAfterCompare.tsx` isolado (4 testes), estado "job concluído" nas 4 páginas com antes/depois (14 testes), `friendlyErrors.ts` (14 testes, 7 originais + 7 novos de FaceFusion/removebg/TTS/Demucs/FFmpeg/modelo ausente) + mensagem amigável no `JobLogPanel` (2 testes), `BatchJobQueue.tsx` isolado (4 testes, incluindo a nova API `renderResult`) + modo lote em `UpscalePage`/`RemoveBgPage`/`FaceSwapPage` (3 testes) + `DenoisePage.tsx` novo (3 testes, incluindo lote), checkbox de ControlNet no `InpaintPage` (1 teste) |
 
 Verificação visual manual formalizada em `webui/frontend/e2e/` (Chrome headless real,
 fora do CI/pre-commit) — substitui o script descartável usado na primeira verificação

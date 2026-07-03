@@ -35,4 +35,41 @@ describe("friendlyErrorMessage", () => {
     const msg = friendlyErrorMessage(["RuntimeError: ComfyUI reportou erro no prompt abc: {...}"]);
     expect(msg).toMatch(/ComfyUI encontrou um problema/i);
   });
+
+  it("reconhece falha do FaceFusion (troca de rosto)", () => {
+    const msg = friendlyErrorMessage(["FaceFusion falhou (codigo 1): erro generico"]);
+    expect(msg).toMatch(/FaceFusion/i);
+  });
+
+  it("reconhece falha da remocao de fundo", () => {
+    const msg = friendlyErrorMessage(["Remocao de fundo falhou (codigo 1): erro generico"]);
+    expect(msg).toMatch(/remoção de fundo/i);
+  });
+
+  it("reconhece falha do TTS", () => {
+    const msg = friendlyErrorMessage(["TTS falhou (codigo 1): erro generico"]);
+    expect(msg).toMatch(/síntese\/clonagem de voz/i);
+  });
+
+  it("reconhece falha do Demucs (limpar audio)", () => {
+    const msg = friendlyErrorMessage(["Remocao de ruido falhou (codigo 1): erro generico"]);
+    expect(msg).toMatch(/separação de áudio/i);
+  });
+
+  it("reconhece falha do FFmpeg na masterizacao", () => {
+    const msg = friendlyErrorMessage(["FFmpeg (masterizacao) falhou (codigo 1): erro generico"]);
+    expect(msg).toMatch(/masterização final/i);
+  });
+
+  it("reconhece modelo/arquivo ausente (FileNotFoundError de um .safetensors)", () => {
+    const msg = friendlyErrorMessage([
+      "FileNotFoundError: [Errno 2] No such file or directory: 'controlnet-depth-sdxl-1.0.safetensors'",
+    ]);
+    expect(msg).toMatch(/modelo necessário/i);
+  });
+
+  it("prioriza o codigo de saida 137 (OOM) sobre a mensagem generica de FaceFusion", () => {
+    const msg = friendlyErrorMessage(["FaceFusion falhou (codigo 137): "]);
+    expect(msg).toMatch(/falta de memória/i);
+  });
 });

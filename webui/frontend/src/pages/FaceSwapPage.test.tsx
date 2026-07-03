@@ -96,4 +96,35 @@ describe("FaceSwapPage", () => {
 
     expect(await screen.findByText(/o job terminou com erro/i)).toBeInTheDocument();
   });
+
+  it("entra em modo lote quando varios alvos sao selecionados, mantendo a mesma origem", async () => {
+    const createSpy = vi.spyOn(api, "createFaceswapJob").mockResolvedValue({ job_id: "job1" });
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: "job1",
+      mode: "faceswap",
+      status: "running",
+      returncode: null,
+      log_tail: [],
+      output_ready: false,
+      secondary_output_ready: false,
+    });
+
+    render(<FaceSwapPage />);
+    await userEvent.upload(screen.getByLabelText(/foto de origem/i), new File(["a"], "origem.jpg", { type: "image/jpeg" }));
+    await userEvent.upload(screen.getByLabelText(/alvo \(foto ou video/i), [
+      new File(["b"], "alvo1.jpg", { type: "image/jpeg" }),
+      new File(["c"], "alvo2.jpg", { type: "image/jpeg" }),
+    ]);
+
+    const startButton = await screen.findByRole("button", { name: /iniciar lote \(2 arquivos\)/i });
+    await userEvent.click(startButton);
+
+    expect(await screen.findByText("alvo1.jpg")).toBeInTheDocument();
+    expect(screen.getByText("alvo2.jpg")).toBeInTheDocument();
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    const callArgs = vi.mocked(createSpy).mock.calls[0][0];
+    expect(callArgs.source.name).toBe("origem.jpg");
+    expect(callArgs.target.name).toBe("alvo1.jpg");
+  });
 });

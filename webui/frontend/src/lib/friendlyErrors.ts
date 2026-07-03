@@ -39,8 +39,35 @@ const KNOWN_PATTERNS: ErrorPattern[] = [
     message: "A operação demorou mais que o esperado e foi cancelada. Tente novamente ou com um arquivo menor.",
   },
   {
+    // Acha o achado real primeiro (mais especifico) do que o generico "ComfyUI
+    // reportou erro" logo abaixo - a ordem dos padroes importa, o primeiro que bater
+    // e' o usado.
+    regex: /FileNotFoundError.*\.(safetensors|pth|ckpt|bin)/i,
+    message: "Um arquivo de modelo necessário não foi encontrado no servidor - pode ser que um download não tenha terminado. Avise quem administra o servidor.",
+  },
+  {
     regex: /ComfyUI reportou erro|execution_error/i,
     message: "O ComfyUI encontrou um problema ao processar o arquivo (pode ser um arquivo corrompido ou não suportado pelo modelo). Veja os detalhes técnicos abaixo.",
+  },
+  {
+    regex: /FaceFusion falhou \(codigo/i,
+    message: "O FaceFusion não conseguiu processar esse arquivo. Verifique se o rosto está bem visível e iluminado na foto de origem, e se o alvo está num formato comum (mp4/mov para vídeo, jpg/png para foto).",
+  },
+  {
+    regex: /Remocao de fundo falhou \(codigo/i,
+    message: "A remoção de fundo não conseguiu processar esse arquivo. Verifique se o formato é comum (jpg/png/mp4) e se o arquivo não está corrompido.",
+  },
+  {
+    regex: /TTS falhou \(codigo/i,
+    message: "A síntese/clonagem de voz falhou. Se estiver clonando uma voz, verifique se a amostra de áudio tem alguns segundos de fala clara, sem muito ruído de fundo.",
+  },
+  {
+    regex: /Remocao de ruido falhou \(codigo/i,
+    message: "A separação de áudio (Demucs) falhou. Verifique se o arquivo de áudio não está corrompido e se o formato é comum (wav/mp3/flac).",
+  },
+  {
+    regex: /FFmpeg \(masterizacao\) falhou \(codigo/i,
+    message: "A masterização final (FFmpeg) falhou. Verifique se o vídeo original e o vídeo processado não estão corrompidos e se ambos têm um formato de vídeo comum.",
   },
 ];
 

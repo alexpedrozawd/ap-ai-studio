@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Alert, Badge, Card, ListGroup } from "react-bootstrap";
+import type { ReactNode } from "react";
+import { Alert, Badge, ListGroup } from "react-bootstrap";
 import type { JobCreateResponse, JobStatusResponse } from "../api";
-import BeforeAfterCompare from "./BeforeAfterCompare";
 import JobLogPanel from "./JobLogPanel";
 
 interface BatchItem {
@@ -14,18 +14,20 @@ interface BatchItem {
 interface BatchJobQueueProps {
   files: File[];
   createJob: (file: File) => Promise<JobCreateResponse>;
-  isVideo: (file: File) => boolean;
-  resultLabel?: string;
-  jobOutputUrl: (jobId: string) => string;
+  renderResult: (file: File, finishedJob: JobStatusResponse) => ReactNode;
 }
 
 // Achado de auditoria (uso profissional): nao havia processamento em lote - cada
-// foto/video tinha que ser enviado e acompanhado um de cada vez. Este componente
+// foto/video/audio tinha que ser enviado e acompanhado um de cada vez. Este componente
 // processa varios arquivos em fila SEQUENCIAL (nao em paralelo) - decisao deliberada,
 // ja que a GPU e' compartilhada com o Ollama e nao ha limite de concorrencia (os
 // Gates do run_vfx.py protegem cada job individualmente, mas nao coordenam entre
 // jobs simultaneos). Rodar em fila evita que N jobs disputem VRAM ao mesmo tempo.
-export default function BatchJobQueue({ files, createJob, isVideo, resultLabel = "Depois", jobOutputUrl }: BatchJobQueueProps) {
+//
+// `renderResult` fica a cargo de cada pagina (antes/depois de imagem, player de audio,
+// etc.) - o componente so' cuida da fila/sequenciamento, nao de como cada modo mostra
+// o resultado (paginas bem diferentes entre si: Trocar Rosto, Limpar Audio, Upscale).
+export default function BatchJobQueue({ files, createJob, renderResult }: BatchJobQueueProps) {
   const [items, setItems] = useState<BatchItem[]>(() =>
     files.map((file) => ({ file, jobId: null, finishedJob: null, error: null })),
   );
@@ -89,27 +91,7 @@ export default function BatchJobQueue({ files, createJob, isVideo, resultLabel =
               {item.jobId && (
                 <JobLogPanel jobId={item.jobId} onFinished={(job) => handleItemFinished(index, job)} />
               )}
-              {item.finishedJob?.status === "done" && item.finishedJob.output_ready && (
-                <Card className="mt-2">
-                  <Card.Body>
-                    <BeforeAfterCompare
-                      originalFile={item.file}
-                      resultUrl={jobOutputUrl(item.finishedJob.id)}
-                      isVideo={isVideo(item.file)}
-                      afterLabel={resultLabel}
-                    />
-                    <div className="mt-2">
-                      <a
-                        href={jobOutputUrl(item.finishedJob.id)}
-                        download
-                        className="btn btn-outline-secondary btn-sm"
-                      >
-                        Baixar
-                      </a>
-                    </div>
-                  </Card.Body>
-                </Card>
-              )}
+              {item.finishedJob?.status === "done" && renderResult(item.file, item.finishedJob)}
               {item.finishedJob?.status === "error" && (
                 <Alert variant="danger" className="mt-2 mb-0">
                   Este arquivo terminou com erro - veja o log acima para o motivo.
