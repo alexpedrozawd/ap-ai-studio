@@ -62,7 +62,7 @@ souber o que é terminal, ambiente virtual, GPU/VRAM etc.
 | Termo | O que é, em termos simples |
 |---|---|
 | **Terminal** | A janela de texto onde você digita comandos em vez de clicar em ícones. Tudo neste manual roda ali. |
-| **Ambiente Conda** | Uma "caixa isolada" com uma versão específica de Python e de bibliotecas, separada do resto do sistema. Este projeto usa **4 caixas diferentes** (explicado abaixo) porque partes do pipeline exigem versões de biblioteca que brigam entre si — misturar tudo numa caixa só quebraria alguma parte. |
+| **Ambiente Conda** | Uma "caixa isolada" com uma versão específica de Python e de bibliotecas, separada do resto do sistema. Este projeto usa **5 caixas diferentes** (explicado abaixo) porque partes do pipeline exigem versões de biblioteca que brigam entre si — misturar tudo numa caixa só quebraria alguma parte. |
 | **GPU / VRAM** | A placa de vídeo (RTX 5060 Ti, 16GB) e a memória dela. A maior parte do trabalho pesado (gerar imagem/vídeo, trocar rosto) roda nela, não no processador comum. VRAM é um recurso escasso e compartilhado com o Ollama (seu servidor de LLM/Qwen) — por isso existem os "Gates" (seção 3). |
 | **ComfyUI** | O motor por trás da geração de imagem e vídeo (texto→vídeo, imagem→vídeo, edição de imagem, geração de música). Roda como um servidor local na porta `8288`, e o `run_vfx.py` conversa com ele por HTTP. |
 | **FaceFusion** | A ferramenta especializada em rosto: troca de rosto, sincronia labial (dublagem), remoção de fundo. Roda como programa de linha de comando, não como servidor contínuo. |
@@ -71,7 +71,7 @@ souber o que é terminal, ambiente virtual, GPU/VRAM etc.
 | **`--dry-run`** | Modo "simulação": roda todas as checagens de segurança mas não executa nada de verdade (nenhum vídeo é gerado, nenhum arquivo é escrito). Útil pra testar se os comandos estão certos antes de gastar tempo/GPU de verdade. |
 | **`--auto-approve`** | Pula a pergunta `[Y/n]` dos Gates 1 e 2 (não do Gate 3, que nunca é pulável). Útil depois que você já validou manualmente que os limites fazem sentido, pra não ter que confirmar toda vez em testes rápidos. |
 
-### Os 4 ambientes Conda e por que existem
+### Os 5 ambientes Conda e por que existem
 
 Você vai precisar saber qual ambiente ativar dependendo do que for fazer:
 
@@ -81,11 +81,14 @@ Você vai precisar saber qual ambiente ativar dependendo do que for fazer:
 | `facefusion-pipeline` | O FaceFusion é chamado *de dentro* do `vfx-pipeline` automaticamente, mas se você quiser rodar o FaceFusion sozinho (ex.: interface visual) | Precisa de `numpy` numa versão fixa que colide com o ComfyUI |
 | `tts-pipeline` | Só usado internamente pelo `run_vfx.py --mode tts` | Precisa de `transformers` numa versão exata |
 | `noise-pipeline` | Só usado internamente pelo `run_vfx.py --mode denoise` | Precisa de uma versão de `torch` específica pra essa GPU |
+| `webui-pipeline` | Roda o backend da interface web (`webui/backend/`, FastAPI) | Só precisa de `fastapi`/`uvicorn`/bibliotecas leves — não precisa do `torch` pesado do `vfx-pipeline` |
 
 **Na prática:** para 90% do trabalho (todos os `--mode` do `run_vfx.py`), você só precisa
 ativar **um** ambiente — o `vfx-pipeline`. Ele mesmo chama os outros três por baixo dos
 panos, trocando de intérprete Python automaticamente. Você só ativa os outros ambientes
-na mão se quiser usar o FaceFusion pela interface visual (seção 4.9 e 5).
+na mão se quiser usar o FaceFusion pela interface visual (seção 4.9 e 5). O
+`webui-pipeline` você nem costuma tocar diretamente — quem liga/desliga ele é o
+`vfx-web`/`vfx-web-enable` (seção 11), não uma ativação manual.
 
 ---
 
@@ -107,12 +110,11 @@ cd /home/ap/ap-ai-studio
 
 ### 2.2 Verificar se o ComfyUI precisa estar ligado
 
-Isto é importante e não é óbvio: **nem todo `--mode` liga o ComfyUI sozinho.**
+Isto é importante e não é óbvio: **nem todo `--mode` usa o ComfyUI.**
 
 | Se você vai usar... | O ComfyUI precisa já estar rodando? |
 |---|---|
-| `--mode video` (gerar/animar vídeo) | **Não** — o próprio comando liga (e religa) o ComfyUI sozinho, dentro da jaula de memória correta. |
-| `--mode inpaint`, `--mode music` | **Sim** — o comando só verifica se já está respondendo; se não estiver, ele espera até 60s e falha com timeout. |
+| `--mode video`, `--mode inpaint`, `--mode music`, `--mode upscale` | **Não** — os quatro ligam (ou religam) o ComfyUI sozinhos, dentro da jaula de memória correta (achado de auditoria: antes só o modo `video` fazia isso — os outros três só esperavam o ComfyUI responder, sem garantir a jaula; corrigido em 2026-07-03, ver `PROMPT_MASTER.md`). |
 | `--mode faceswap`, `--mode removebg`, `--mode tts`, `--mode denoise`, `--mode master` | Não precisa (não usam o ComfyUI, ou só tentam liberar VRAM dele se ele por acaso estiver ligado). |
 
 Para checar se está rodando, num outro terminal (ou no mesmo, rapidamente):
@@ -121,8 +123,10 @@ Para checar se está rodando, num outro terminal (ou no mesmo, rapidamente):
 curl -s http://127.0.0.1:8288/system_stats | head -c 200
 ```
 
-Se voltar um JSON, está no ar. Se der erro de conexão recusada, precisa ligar manualmente
-antes de usar `inpaint` ou `music`:
+Se voltar um JSON, está no ar. Como os quatro modos da tabela acima já ligam/religam o
+ComfyUI sozinhos (dentro da jaula), você **não precisa** ligar manualmente antes de
+usá-los — isso só é útil se quiser acessar a interface visual do ComfyUI direto pelo
+navegador (ver abaixo), ou pra diagnosticar um problema:
 
 ```bash
 conda activate vfx-pipeline
@@ -133,6 +137,10 @@ python main.py --port 8288 --listen 127.0.0.1
 Deixe esse terminal aberto (ou rode em segundo plano com `&` / `tmux`/`screen` se preferir
 não travar o terminal). Ele só escuta em `127.0.0.1` (só o próprio servidor acessa) — é
 proposital, por segurança (ver a regra de firewall no `CLAUDE.md` global do servidor).
+**Atenção:** ligado assim manualmente, o ComfyUI fica **sem a jaula de memória** do Gate
+1 — se depois disso você rodar `inpaint`/`music`/`upscale`/`video`, o próprio comando
+detecta que está fora da jaula, derruba essa instância e religa presa automaticamente
+(mesmo comportamento de quando a interface web liga o ComfyUI pelo botão "Ligar").
 
 **Para acessar a interface visual do ComfyUI de outro computador** (seu notebook, por
 exemplo) via Tailscale, é preciso ligar apontando pro IP do Tailscale em vez de
@@ -307,8 +315,8 @@ item 4.4.
 Serve para apagar um objeto/pessoa de uma foto e preencher o espaço com outra coisa (ex.:
 remover uma pessoa de fundo, trocar o cenário de uma área específica).
 
-**Pré-requisito:** o ComfyUI precisa já estar rodando (ver seção 2.2) — este modo não liga
-ele sozinho.
+Não precisa ligar o ComfyUI manualmente antes — este modo já liga/religa ele sozinho,
+dentro da jaula de memória (ver seção 2.2).
 
 Você precisa preparar uma **máscara**: uma imagem do mesmo tamanho da foto original, em
 preto e branco, onde **branco = área a apagar/reescrever** e **preto = área a manter
@@ -453,7 +461,8 @@ puro (chiado constante, por exemplo), pode não ser a ferramenta certa.
 
 ### 4.11 Gerar uma música
 
-**Pré-requisito:** o ComfyUI precisa já estar rodando (mesma observação do item 4.6).
+Não precisa ligar o ComfyUI manualmente antes — este modo já liga/religa ele sozinho
+(mesma observação do item 4.6).
 
 ```bash
 python run_vfx.py --mode music \
@@ -507,8 +516,9 @@ python run_vfx.py --mode upscale \
   --fps 24
 ```
 
-**Pré-requisito:** o ComfyUI precisa já estar rodando (mesma observação do item 4.6) —
-o upscale usa os mesmos nodes do ComfyUI que a geração de vídeo.
+Não precisa ligar o ComfyUI manualmente antes — este modo já liga/religa ele sozinho
+(mesma observação do item 4.6). O upscale usa os mesmos nodes do ComfyUI que a geração
+de vídeo.
 
 ---
 
@@ -549,7 +559,7 @@ frequência esperada:
 | Gate 3 aborta sozinho, sem perguntar | Menos de 30GB livres em `/` | `df -h /`, apague renders antigos de `/home/ap/ai_pipeline` que não precisa mais |
 | Gate 2 avisa VRAM baixa | O Ollama (Qwen) está com um modelo carregado na GPU | Descarregue o modelo (`ollama stop <modelo>`) antes de renders pesados |
 | `EOFError` ao responder um Gate | Você chamou com `conda run -n ...` em vez de `conda activate` | Use `conda activate vfx-pipeline && python run_vfx.py ...` |
-| `--mode inpaint`/`music` trava e dá timeout | ComfyUI não está rodando | Ligue manualmente (seção 2.2) antes de rodar |
+| `--mode inpaint`/`music`/`upscale`/`video` trava esperando o ComfyUI ficar pronto | Raro — esses 4 modos já ligam/religam o ComfyUI sozinhos (seção 2.2); só falha se `systemd-run` estiver indisponível ou a porta 8288 travada por outro processo | Confirme com `curl -s http://127.0.0.1:8288/system_stats`; se não responder, veja o log em `logs/comfyui_video_mode.log` |
 | Face-swap/removebg muito lento, sem uso visível de GPU | `onnxruntime` caiu silenciosamente pra CPU (bug conhecido, já contornado no código) — se persistir, pode ser outro processo prendendo a GPU | `nvidia-smi` pra ver o que está usando a placa |
 | Dublagem (lip sync) lenta | É esperado — essa etapa roda em CPU por decisão de arquitetura (ver seção 4.9) | Nenhuma ação — ~136s por clipe curto é o tempo normal |
 | Vídeo final com áudio dessincronizado | Vídeo original tinha frame rate variável (comum em vídeo de celular) | Trave o frame rate antes: `ffmpeg -i original.mp4 -r 24 -c:v libx264 -c:a copy cfr_original.mp4`, e use esse arquivo como `--original` no modo `master` |
@@ -569,14 +579,14 @@ cd /home/ap/ap-ai-studio
 | Trocar rosto (vídeo longo) | ...acima + `--chunk-seconds 30` |
 | Gerar vídeo do zero (texto) | `python run_vfx.py --mode video --prompt "..." --width 480 --height 480 --num-frames 161` |
 | Animar uma foto | ...acima + `--source-image F.jpg` |
-| Editar/apagar algo de uma foto | `python run_vfx.py --mode inpaint --source-image F.jpg --mask-image M.png --prompt "..." --output O.jpg` (ComfyUI precisa estar ligado) |
+| Editar/apagar algo de uma foto | `python run_vfx.py --mode inpaint --source-image F.jpg --mask-image M.png --prompt "..." --output O.jpg` (liga o ComfyUI sozinho se precisar) |
 | Remover fundo | `python run_vfx.py --mode removebg --target F.jpg --output O.png` |
 | Gerar fala / clonar voz | `python run_vfx.py --mode tts --text "..." --speaker-wav V.wav --output O.wav` |
 | Dublar vídeo (2 passos) | TTS (acima) + FaceFusion `headless-run --processors lip_syncer` manual (seção 4.9) |
 | Isolar voz / remover ruído | `python run_vfx.py --mode denoise --target A.wav --output O.wav` |
-| Gerar música | `python run_vfx.py --mode music --prompt "..." --music-duration 15 --output O.wav` (ComfyUI precisa estar ligado) |
+| Gerar música | `python run_vfx.py --mode music --prompt "..." --music-duration 15 --output O.wav` (liga o ComfyUI sozinho se precisar) |
 | Juntar áudio original + vídeo processado | `python run_vfx.py --mode master --original ORIG.mp4 --processed-video PROC.mp4 --output FINAL.mp4` |
-| Aumentar resolução de foto/vídeo pronto (4x) | `python run_vfx.py --mode upscale --target F.jpg --output O.jpg` (ComfyUI precisa estar ligado) |
+| Aumentar resolução de foto/vídeo pronto (4x) | `python run_vfx.py --mode upscale --target F.jpg --output O.jpg` (liga o ComfyUI sozinho se precisar) |
 | Testar sem executar nada de verdade | adicione `--dry-run` em qualquer comando acima |
 | Pular confirmações repetidas (exceto disco) | adicione `--auto-approve` |
 
@@ -614,10 +624,11 @@ segurança de 30GB do Gate 3 é levada a sério — evite deixar o disco chegar 
 - **Nomes exatos das vozes embutidas do TTS** não foram levantados/confirmados neste
   manual — use `--speaker-wav` como alternativa garantida se um nome específico falhar.
 - **ComfyUI não tem supervisão automática (`systemd`)** — só a interface web tem essa
-  opção (`vfx-web-enable`, seção 11). Decisão deliberada: o modo `video` já mata e
-  religa o ComfyUI dentro da própria jaula de memória toda vez que roda, e um serviço
-  com reinício automático brigaria com isso. Se o ComfyUI cair, religue com `vfx-ligar`
-  ou o botão "Ligar" da interface web.
+  opção (`vfx-web-enable`, seção 11). Decisão deliberada: os modos `video`/`inpaint`/
+  `music`/`upscale` já matam e religam o ComfyUI dentro da própria jaula de memória
+  toda vez que rodam, e um serviço com reinício automático brigaria com isso. Se o
+  ComfyUI cair, religue com `vfx-ligar` ou o botão "Ligar" da interface web (ou não
+  faça nada — o próximo desses 4 modos que você rodar já religa sozinho).
 
 ---
 
@@ -651,11 +662,12 @@ final do comando, exatamente como no comando completo.
 | `vfx-limpar` | `--mode denoise` (seção 4.10) | `vfx-limpar audio.wav voz.wav [resto.wav]` |
 | `vfx-musica` | `--mode music` (seção 4.11) | `vfx-musica "trilha épica" musica.wav` |
 | `vfx-juntar` | `--mode master` (seção 4.12) | `vfx-juntar original.mp4 processado.mp4 final.mp4` |
+| `vfx-upscale` | `--mode upscale` (seção 4.13) | `vfx-upscale foto_antiga.jpg foto_antiga_4x.jpg` |
 | `vfx-ajuda` | — | Imprime esta lista no terminal, a qualquer momento |
 
-`vfx-editar` e `vfx-musica` checam sozinhos se o ComfyUI está ligado e, se não estiver,
-perguntam `[Y/n]` se você quer ligar agora — não precisa lembrar de rodar `vfx-ligar`
-antes, só confirmar quando ele perguntar.
+`vfx-editar`, `vfx-musica`, `vfx-upscale` e `vfx-video`/`vfx-anima` ligam/religam o
+ComfyUI sozinhos se precisar (seção 2.2) — não tem pergunta extra do atalho em si, só
+demora um pouco mais na primeira chamada se o ComfyUI estiver desligado.
 
 **Se os comandos não funcionarem num terminal já aberto** (só passam a valer em terminais
 *novos* depois de instalados), rode uma vez: `source ~/.bashrc` — ou simplesmente feche e
@@ -697,9 +709,11 @@ pelo `run_vfx.py` — a interface chama o FaceFusion diretamente. Por isso o "Mo
 dessa página não é um `--dry-run` de verdade (o `facefusion.py` não tem essa flag) — ele
 só confirma que os arquivos foram enviados, sem processar nada.
 
-**Editar Imagem e Música continuam exigindo o ComfyUI ligado** (mesma regra da seção
-2.2) — essas duas páginas checam sozinhas e oferecem um botão "Ligar ComfyUI" se
-estiver desligado.
+**Editar Imagem e Música mostram um aviso se o ComfyUI estiver desligado** — mas isso
+não bloqueia nada (mesma regra da seção 2.2: esses modos religam o ComfyUI sozinhos
+ao clicar em "Iniciar", só demora um pouco mais na primeira chamada). O aviso só
+existe pra você saber o motivo de uma demora maior, e tem um botão "Ligar ComfyUI"
+se preferir adiantar isso antes.
 
 ### Como ligar
 
