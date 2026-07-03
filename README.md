@@ -2,6 +2,76 @@
 
 Repositório principal da arquitetura do "AP AI Studio". Este repositório contém a fundação (Prompt Architect) e o código fonte (em desenvolvimento) para orquestração assíncrona, segura e de alto desempenho de IA generativa em vídeo (ComfyUI e FaceFusion) num servidor Linux multi-tarefa.
 
+---
+
+## Como usar
+
+Existem duas formas de usar o pipeline — escolha a que preferir, elas fazem exatamente a mesma coisa por baixo dos panos.
+
+> 📖 Este README é um começo rápido. O **guia completo, didático, explicando cada
+> conceito do zero** está em [`MANUAL_USO.md`](MANUAL_USO.md) — comece por lá se
+> nunca usou nenhuma dessas ferramentas antes.
+
+### Opção A — Interface web (mais fácil, sem terminal)
+
+1. Num terminal, ligue a interface:
+   ```bash
+   vfx-web
+   ```
+   Na primeira vez ele builda o frontend sozinho (demora um pouco); nas próximas, sobe
+   direto. Deixe esse terminal aberto — `Ctrl+C` desliga.
+2. Abra no navegador: **`http://100.122.206.41:8299`** (funciona no navegador do
+   próprio servidor ou de qualquer aparelho na sua rede Tailscale).
+3. Navegue pelo menu no topo:
+   - **Status** — vê se o ComfyUI está ligado, VRAM e disco livres.
+   - **Gerar Vídeo** — texto→vídeo ou imagem→vídeo.
+   - **Imagem ▾** — Trocar Rosto, Editar Imagem, Remover Fundo.
+   - **Áudio ▾** — Voz (TTS/clonagem), Dublagem, Limpar Áudio, Música.
+   - **Masterizar** — junta áudio/legendas originais com o vídeo processado.
+4. Em qualquer página: preencha o formulário, marque **"Modo teste (--dry-run)"** se
+   quiser só validar sem gastar GPU, e clique **Iniciar**. Um painel de log ao vivo
+   mostra o progresso; quando terminar, o resultado aparece com preview e botão de
+   baixar.
+
+Detalhes completos (o que cada campo faz, limitações conhecidas) na seção 11 do
+[`MANUAL_USO.md`](MANUAL_USO.md).
+
+### Opção B — Terminal (atalhos `vfx-*`)
+
+Os atalhos já ficam disponíveis em qualquer terminal novo (carregados via `~/.bashrc`).
+Para ver a lista completa a qualquer momento:
+
+```bash
+vfx-ajuda
+```
+
+Exemplo — trocar o rosto de uma foto/vídeo:
+
+```bash
+vfx-rosto minha_foto.jpg cena_do_filme.mp4 resultado.mp4
+```
+
+Exemplo — gerar um vídeo do zero a partir de texto:
+
+```bash
+vfx-video "um dragão azul voando sobre um vale verde ao pôr do sol"
+```
+
+Cada atalho tem seus argumentos obrigatórios explicados no próprio `vfx-ajuda`, e
+qualquer flag extra do `run_vfx.py` (`--dry-run`, `--chunk-seconds`, `--width` etc.)
+pode ser adicionada no final do comando. Passo a passo de cada função (com exemplos
+reais e o que cada flag faz) nas [seções 4 e 10 do MANUAL_USO.md](MANUAL_USO.md).
+
+### O que esperar ao rodar algo
+
+Antes de qualquer processamento pesado (troca de rosto, geração de vídeo etc.), três
+"Gates" de segurança verificam memória, VRAM e espaço em disco — protegendo o Ollama e
+o resto do servidor de travar. No terminal isso aparece como confirmações `[Y/n]`; na
+interface web, um clique em "Iniciar" já cobre isso, e as decisões aparecem no log ao
+vivo. Ver [seção 3 do MANUAL_USO.md](MANUAL_USO.md) para o detalhe de cada Gate.
+
+---
+
 ## Estrutura do Repositório
 - `PROMPT_MASTER.md`: O "código-fonte" lógico (Prompt Nível 10) que deve ser usado para inicializar a criação ou atualização da infraestrutura do estúdio pela IA.
 - `MANUAL_USO.md`: Manual do usuário passo a passo (didático, para quem nunca usou o pipeline) — como rodar cada função (`--mode`) do `run_vfx.py`: troca de rosto, geração de vídeo, edição de imagem, clonagem de voz, dublagem, remoção de ruído, geração de música e masterização final.
