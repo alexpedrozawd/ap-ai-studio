@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Alert, Button, Card, Col, Form, Row } from "react-bootstrap";
 import { createFaceswapJob, jobOutputUrl } from "../api";
 import type { JobStatusResponse } from "../api";
+import BeforeAfterCompare from "../components/BeforeAfterCompare";
 import JobLogPanel from "../components/JobLogPanel";
 
 export default function FaceSwapPage() {
@@ -115,11 +116,11 @@ export default function FaceSwapPage() {
         <Card className="mt-3">
           <Card.Body>
             <Card.Title>Resultado</Card.Title>
-            {targetIsVideo ? (
-              <video src={jobOutputUrl(finishedJob.id)} controls style={{ maxWidth: "100%", maxHeight: 400 }} />
-            ) : (
-              <img src={jobOutputUrl(finishedJob.id)} alt="resultado" style={{ maxWidth: "100%", maxHeight: 400 }} />
-            )}
+            <BeforeAfterCompare
+              originalFile={target}
+              resultUrl={jobOutputUrl(finishedJob.id)}
+              isVideo={targetIsVideo}
+            />
             <div className="mt-2">
               <a href={jobOutputUrl(finishedJob.id)} download className="btn btn-outline-secondary btn-sm">
                 Baixar

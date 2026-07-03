@@ -3,11 +3,13 @@ import logging
 import os
 import socket
 import subprocess
+import tempfile
 
 import pytest
 
 from run_vfx import (
 	CONDA_FALLBACK_PATHS,
+	CONTROLNET_DEPTH_SDXL,
 	COMFYUI_DIR,
 	COMFYUI_INPUT_DIR,
 	MAX_VIDEO_FRAMES,
@@ -35,10 +37,12 @@ from run_vfx import (
 	confirm,
 	free_comfyui_vram,
 	build_musicgen_workflow,
+	build_upscale_workflow,
 	gate_1_memory_jail,
 	gate_2_vram_check,
 	gate_3_disk_check,
 	get_video_duration_seconds,
+	is_video_file,
 	orchestrate,
 	run_in_memory_jail,
 	split_video_into_chunks,
@@ -158,7 +162,7 @@ def test_gate1_auto_approve_skips_prompt(monkeypatch):
 		called["confirm"] = True
 		return True
 
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
 	result = asyncio.run(gate_1_memory_jail(TEST_LOGGER, mode="faceswap", auto_approve=True, dry_run=False))
 	assert called["confirm"] is False
 	assert result["memory_max"] == "24G"
@@ -186,7 +190,7 @@ def test_gate1_denied_by_user_raises(monkeypatch):
 	async def fake_confirm(prompt):
 		return False
 
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
 	with pytest.raises(GateDenied):
 		asyncio.run(gate_1_memory_jail(TEST_LOGGER, mode="faceswap", auto_approve=False, dry_run=False))
 
@@ -200,8 +204,8 @@ def test_gate2_forced_low_vram_triggers_alert_and_can_be_denied(monkeypatch):
 	async def fake_confirm(prompt):
 		return False
 
-	monkeypatch.setattr("run_vfx.get_vram_free_mb", fake_vram)
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.get_vram_free_mb", fake_vram)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
 	with pytest.raises(GateDenied):
 		asyncio.run(gate_2_vram_check(TEST_LOGGER, mode="faceswap", auto_approve=False, dry_run=False))
 
@@ -217,8 +221,8 @@ def test_gate2_unknown_vram_does_not_crash_and_reports_none(monkeypatch):
 	async def fake_confirm(prompt):
 		return True
 
-	monkeypatch.setattr("run_vfx.get_vram_free_mb", fake_vram)
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.get_vram_free_mb", fake_vram)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
 	result = asyncio.run(gate_2_vram_check(TEST_LOGGER, mode="faceswap", auto_approve=False, dry_run=False))
 	assert result["vram_free_mb"] is None
 
@@ -233,8 +237,8 @@ def test_gate2_auto_approve_skips_prompt(monkeypatch):
 		called["confirm"] = True
 		return True
 
-	monkeypatch.setattr("run_vfx.get_vram_free_mb", fake_vram)
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.get_vram_free_mb", fake_vram)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
 	result = asyncio.run(gate_2_vram_check(TEST_LOGGER, mode="faceswap", auto_approve=True, dry_run=False))
 	assert called["confirm"] is False
 	assert result["vram_free_mb"] == 16000
@@ -253,11 +257,11 @@ def test_gate2_video_mode_offers_to_unload_ollama_when_tight(monkeypatch):
 	async def fake_unload(logger, model="qwen"):
 		calls["unload"] = True
 
-	monkeypatch.setattr("run_vfx.get_vram_free_mb", fake_vram)
-	monkeypatch.setattr("run_vfx.get_ram_free_mb", lambda: 2000)
-	monkeypatch.setattr("run_vfx.get_swap_used_mb", lambda: 100)
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
-	monkeypatch.setattr("run_vfx.unload_ollama_model", fake_unload)
+	monkeypatch.setattr("vfx_gates.get_vram_free_mb", fake_vram)
+	monkeypatch.setattr("vfx_gates.get_ram_free_mb", lambda: 2000)
+	monkeypatch.setattr("vfx_gates.get_swap_used_mb", lambda: 100)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.unload_ollama_model", fake_unload)
 
 	asyncio.run(gate_2_vram_check(TEST_LOGGER, mode="video", auto_approve=False, dry_run=False))
 	assert calls["unload"] is True
@@ -280,11 +284,11 @@ def test_gate2_auto_approve_unloads_ollama_without_asking_when_tight(monkeypatch
 	async def fake_unload(logger, model="qwen"):
 		calls["unload"] = True
 
-	monkeypatch.setattr("run_vfx.get_vram_free_mb", fake_vram)
-	monkeypatch.setattr("run_vfx.get_ram_free_mb", lambda: 2000)
-	monkeypatch.setattr("run_vfx.get_swap_used_mb", lambda: 100)
-	monkeypatch.setattr("run_vfx.confirm", fail_if_called)
-	monkeypatch.setattr("run_vfx.unload_ollama_model", fake_unload)
+	monkeypatch.setattr("vfx_gates.get_vram_free_mb", fake_vram)
+	monkeypatch.setattr("vfx_gates.get_ram_free_mb", lambda: 2000)
+	monkeypatch.setattr("vfx_gates.get_swap_used_mb", lambda: 100)
+	monkeypatch.setattr("vfx_gates.confirm", fail_if_called)
+	monkeypatch.setattr("vfx_gates.unload_ollama_model", fake_unload)
 
 	asyncio.run(gate_2_vram_check(TEST_LOGGER, mode="video", auto_approve=True, dry_run=False))
 	assert calls["unload"] is True
@@ -293,7 +297,7 @@ def test_gate2_auto_approve_unloads_ollama_without_asking_when_tight(monkeypatch
 # --- Fase 3: Gate 3 (disco) forçado, nunca pulável ---
 
 def test_gate3_forced_low_disk_always_aborts_even_with_auto_approve(monkeypatch):
-	monkeypatch.setattr("run_vfx.get_disk_free_gb", lambda path="/": 10.0)
+	monkeypatch.setattr("vfx_gates.get_disk_free_gb", lambda path="/": 10.0)
 	with pytest.raises(GateDenied):
 		asyncio.run(gate_3_disk_check(TEST_LOGGER, auto_approve=True, dry_run=False))
 
@@ -305,8 +309,8 @@ def test_gate3_ignores_auto_approve_and_still_prompts(monkeypatch):
 		called["confirm"] = True
 		return True
 
-	monkeypatch.setattr("run_vfx.get_disk_free_gb", lambda path="/": 100.0)
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.get_disk_free_gb", lambda path="/": 100.0)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
 	asyncio.run(gate_3_disk_check(TEST_LOGGER, auto_approve=True, dry_run=False))
 	assert called["confirm"] is True
 
@@ -315,8 +319,8 @@ def test_gate3_denied_by_user_even_with_enough_space(monkeypatch):
 	async def fake_confirm(prompt):
 		return False
 
-	monkeypatch.setattr("run_vfx.get_disk_free_gb", lambda path="/": 100.0)
-	monkeypatch.setattr("run_vfx.confirm", fake_confirm)
+	monkeypatch.setattr("vfx_gates.get_disk_free_gb", lambda path="/": 100.0)
+	monkeypatch.setattr("vfx_gates.confirm", fake_confirm)
 	with pytest.raises(GateDenied):
 		asyncio.run(gate_3_disk_check(TEST_LOGGER, auto_approve=False, dry_run=False))
 
@@ -352,6 +356,58 @@ def test_musicgen_workflow_chains_generation_and_save():
 	assert wf["save"]["inputs"]["audio"] == ["musicgen", 0]
 
 
+# --- Upscale standalone (pedido do usuario, auditoria de uso profissional) ---
+
+def test_is_video_file_detects_common_video_extensions():
+	assert is_video_file("cena.mp4") is True
+	assert is_video_file("cena.MOV") is True
+	assert is_video_file("foto.jpg") is False
+	assert is_video_file("foto.png") is False
+
+
+def test_upscale_workflow_image_uses_load_image_and_save_image():
+	wf = build_upscale_workflow("foto.jpg", is_video=False)
+	assert wf["load_image"]["inputs"]["image"] == "foto.jpg"
+	assert wf["upscale"]["inputs"]["image"] == ["load_image", 0]
+	assert wf["save"]["class_type"] == "SaveImage"
+	assert wf["save"]["inputs"]["images"] == ["upscale", 0]
+	assert "load_video" not in wf
+
+
+def test_upscale_workflow_video_uses_vhs_load_video_and_vhs_video_combine():
+	wf = build_upscale_workflow("cena.mp4", is_video=True, output_fps=30.0)
+	assert wf["load_video"]["class_type"] == "VHS_LoadVideo"
+	assert wf["load_video"]["inputs"]["video"] == "cena.mp4"
+	assert wf["upscale"]["inputs"]["image"] == ["load_video", 0]
+	assert wf["save"]["class_type"] == "VHS_VideoCombine"
+	assert wf["save"]["inputs"]["frame_rate"] == 30.0
+	assert "load_image" not in wf
+
+
+def test_upscale_workflow_uses_the_same_realesrgan_model_as_video_mode():
+	from run_vfx import WAN22_UPSCALE_MODEL
+	wf = build_upscale_workflow("foto.jpg")
+	assert wf["upscale_model"]["inputs"]["model_name"] == WAN22_UPSCALE_MODEL
+
+
+def test_upscale_mode_requires_target_and_output(monkeypatch):
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+	args = build_parser().parse_args(["--mode", "upscale", "--auto-approve"])
+	rc = asyncio.run(orchestrate(args, TEST_LOGGER))
+	assert rc == 1
+
+
+def test_upscale_mode_rejects_missing_target_file(monkeypatch, tmp_path):
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+	args = build_parser().parse_args([
+		"--mode", "upscale", "--auto-approve",
+		"--target", str(tmp_path / "nao_existe.jpg"),
+		"--output", str(tmp_path / "saida.jpg"),
+	])
+	rc = asyncio.run(orchestrate(args, TEST_LOGGER))
+	assert rc == 1
+
+
 def test_demucs_command_uses_its_own_conda_env_and_two_stems_mode():
 	cmd = build_demucs_command("/tmp/entrada.wav", "/tmp/voz.wav", output_instrumental="/tmp/resto.wav")
 	assert "noise-pipeline" in cmd[0]
@@ -368,7 +424,7 @@ def test_facefusion_env_sets_ld_library_path_for_cuda(monkeypatch, tmp_path):
 	nvidia_dir = fake_env_root / "nvidia"
 	(nvidia_dir / "cublas" / "lib").mkdir(parents=True)
 	(nvidia_dir / "cudnn" / "lib").mkdir(parents=True)
-	monkeypatch.setattr("run_vfx.os.path.expanduser", lambda p: p.replace("~/miniconda3", str(tmp_path)))
+	monkeypatch.setattr("vfx_facefusion.os.path.expanduser", lambda p: p.replace("~/miniconda3", str(tmp_path)))
 	env = build_facefusion_env()
 	assert "cublas/lib" in env["LD_LIBRARY_PATH"]
 	assert "cudnn/lib" in env["LD_LIBRARY_PATH"]
@@ -444,19 +500,110 @@ def test_inpaint_workflow_chains_image_mask_encode_sample_decode_save():
 	assert wf["load_mask"]["inputs"]["image"] == "mascara.png"
 	assert wf["mask_to_grayscale"]["inputs"]["image"] == ["load_mask", 0]
 	assert wf["encode_inpaint"]["inputs"]["pixels"] == ["load_image", 0]
-	assert wf["encode_inpaint"]["inputs"]["mask"] == ["mask_to_grayscale", 0]
+	assert wf["encode_inpaint"]["inputs"]["mask"] == ["feather_mask", 0]
 	assert wf["sampler"]["inputs"]["latent_image"] == ["encode_inpaint", 0]
 	assert wf["decode"]["inputs"]["samples"] == ["sampler", 0]
-	assert wf["save"]["inputs"]["images"] == ["decode", 0]
+	assert wf["save"]["inputs"]["images"] == ["composite", 0]
+
+
+def test_inpaint_workflow_feathers_mask_and_composites_onto_original():
+	"""Achado real (teste com ControlNet mostrou uma costura visivel na borda da mascara):
+	a mascara e' suavizada (FeatherMask) antes de virar latente, e o resultado gerado e'
+	colado de volta na FOTO ORIGINAL (nao na imagem inteira decodificada pelo VAE) - a area
+	fora da mascara fica byte-a-byte igual a original, sem a deriva de cor/textura que o
+	round-trip do VAE introduziria na imagem inteira."""
+	wf = build_inpaint_workflow("foto.png", "mascara.png", feather_amount=30)
+	assert wf["feather_mask"]["class_type"] == "FeatherMask"
+	assert wf["feather_mask"]["inputs"]["mask"] == ["mask_to_grayscale", 0]
+	assert wf["feather_mask"]["inputs"]["left"] == 30
+	assert wf["feather_mask"]["inputs"]["top"] == 30
+	assert wf["feather_mask"]["inputs"]["right"] == 30
+	assert wf["feather_mask"]["inputs"]["bottom"] == 30
+	assert wf["composite"]["class_type"] == "ImageCompositeMasked"
+	assert wf["composite"]["inputs"]["destination"] == ["load_image", 0]
+	assert wf["composite"]["inputs"]["source"] == ["decode", 0]
+	assert wf["composite"]["inputs"]["mask"] == ["feather_mask", 0]
 
 
 def test_inpaint_mode_requires_source_and_mask_image(monkeypatch):
-	monkeypatch.setattr("run_vfx.confirm", _fake_confirm_yes)
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
 	args = build_parser().parse_args(["--mode", "inpaint", "--auto-approve"])
 	logger = logging.getLogger("test-inpaint-missing-args")
 	logger.addHandler(logging.NullHandler())
 	rc = asyncio.run(orchestrate(args, logger))
 	assert rc == 1
+
+
+def test_inpaint_workflow_without_controlnet_has_no_depth_nodes():
+	"""Comportamento padrao (use_depth_controlnet=False) nao muda em nada - sampler continua
+	ligado direto em positive/negative, sem nenhum node de ControlNet."""
+	wf = build_inpaint_workflow("foto.png", "mascara.png")
+	assert "controlnet_apply" not in wf
+	assert "depth_preprocessor" not in wf
+	assert "controlnet_loader" not in wf
+	assert wf["sampler"]["inputs"]["positive"] == ["positive", 0]
+	assert wf["sampler"]["inputs"]["negative"] == ["negative", 0]
+
+
+def test_inpaint_workflow_with_controlnet_adds_depth_pipeline():
+	wf = build_inpaint_workflow("foto.png", "mascara.png", use_depth_controlnet=True, controlnet_strength=0.75)
+	assert wf["depth_preprocessor"]["class_type"] == "MiDaS-DepthMapPreprocessor"
+	assert wf["depth_preprocessor"]["inputs"]["image"] == ["load_image", 0]
+	assert wf["controlnet_loader"]["class_type"] == "ControlNetLoader"
+	assert wf["controlnet_loader"]["inputs"]["control_net_name"] == CONTROLNET_DEPTH_SDXL
+	assert wf["controlnet_apply"]["inputs"]["positive"] == ["positive", 0]
+	assert wf["controlnet_apply"]["inputs"]["negative"] == ["negative", 0]
+	assert wf["controlnet_apply"]["inputs"]["control_net"] == ["controlnet_loader", 0]
+	assert wf["controlnet_apply"]["inputs"]["image"] == ["depth_preprocessor", 0]
+	assert wf["controlnet_apply"]["inputs"]["strength"] == 0.75
+	# O sampler passa a usar a saida do ControlNet, nao mais o positive/negative crus
+	assert wf["sampler"]["inputs"]["positive"] == ["controlnet_apply", 0]
+	assert wf["sampler"]["inputs"]["negative"] == ["controlnet_apply", 1]
+
+
+def test_inpaint_mode_passes_controlnet_flags_through_to_workflow(monkeypatch):
+	"""--use-depth-controlnet e --controlnet-strength no CLI chegam ate build_inpaint_workflow."""
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+
+	async def fake_poll_comfyui_system_stats(*args, **kwargs):
+		return None
+	monkeypatch.setattr("run_vfx.poll_comfyui_system_stats", fake_poll_comfyui_system_stats)
+
+	captured_kwargs = {}
+	real_build_inpaint_workflow = build_inpaint_workflow
+
+	def fake_build_inpaint_workflow(*args, **kwargs):
+		captured_kwargs.update(kwargs)
+		return real_build_inpaint_workflow(*args, **kwargs)
+	monkeypatch.setattr("run_vfx.build_inpaint_workflow", fake_build_inpaint_workflow)
+
+	async def fake_submit_comfyui_prompt(workflow, logger=None):
+		return "fake-prompt-id"
+	monkeypatch.setattr("run_vfx.submit_comfyui_prompt", fake_submit_comfyui_prompt)
+
+	async def fake_wait_for_comfyui_prompt(prompt_id, logger=None, timeout=600.0):
+		return {"outputs": {"save": {"images": [{"filename": "x.png", "subfolder": ""}]}}}
+	monkeypatch.setattr("run_vfx.wait_for_comfyui_prompt", fake_wait_for_comfyui_prompt)
+
+	monkeypatch.setattr("run_vfx.get_comfyui_output_file", lambda history_entry: __file__)
+	monkeypatch.setattr("shutil.copy", lambda src, dst: None)
+
+	with tempfile.NamedTemporaryFile(suffix=".png") as source_image, tempfile.NamedTemporaryFile(suffix=".png") as mask_image:
+		args = build_parser().parse_args([
+			"--mode", "inpaint", "--auto-approve",
+			"--source-image", source_image.name,
+			"--mask-image", mask_image.name,
+			"--output", "/tmp/nao_deveria_ser_usado.png",
+			"--use-depth-controlnet",
+			"--controlnet-strength", "0.9",
+		])
+		logger = logging.getLogger("test-inpaint-controlnet-flags")
+		logger.addHandler(logging.NullHandler())
+		rc = asyncio.run(orchestrate(args, logger))
+
+	assert rc == 0
+	assert captured_kwargs["use_depth_controlnet"] is True
+	assert captured_kwargs["controlnet_strength"] == 0.9
 
 
 def test_video_mode_copies_comfyui_output_when_output_flag_given(monkeypatch, tmp_path):
@@ -466,7 +613,7 @@ def test_video_mode_copies_comfyui_output_when_output_flag_given(monkeypatch, tm
 	usando get_comfyui_output_file() - so' faltava o modo video tambem usar essa mesma
 	funcao (ela ja e' generica o bastante pro node VHS_VideoCombine, id "save", sem
 	precisar mudar nada nela)."""
-	monkeypatch.setattr("run_vfx.confirm", _fake_confirm_yes)
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
 
 	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
 		return None
@@ -508,7 +655,7 @@ def test_video_mode_copies_comfyui_output_when_output_flag_given(monkeypatch, tm
 def test_video_mode_without_output_flag_still_succeeds(monkeypatch):
 	"""--output continua opcional no modo video - sem ele, comportamento antigo (so' loga
 	onde o ComfyUI salvou) se mantem, sem quebrar quem ja usava o modo video sem --output."""
-	monkeypatch.setattr("run_vfx.confirm", _fake_confirm_yes)
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
 
 	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
 		return None
@@ -525,6 +672,62 @@ def test_video_mode_without_output_flag_still_succeeds(monkeypatch):
 	args = build_parser().parse_args(["--mode", "video", "--auto-approve", "--prompt", "um teste"])
 	rc = asyncio.run(orchestrate(args, TEST_LOGGER))
 	assert rc == 0
+
+
+def test_blocks_to_swap_flag_overrides_the_default_when_given(monkeypatch):
+	"""Achado real (teste ao vivo de velocidade): reduzir blocks_to_swap acelera o render
+	(~33% mais rapido em escala pequena) mas travou o ComfyUI com OOM real nos 161 frames
+	padrao em 480x480 - por isso o valor mais baixo NAO virou o novo padrao, so' uma opcao
+	avancada (--blocks-to-swap) pra quem quiser arriscar em renders curtos."""
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+
+	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
+		return None
+	monkeypatch.setattr("run_vfx.ensure_comfyui_running_under_jail", fake_ensure_comfyui_running_under_jail)
+
+	captured_workflow = {}
+
+	async def fake_submit_comfyui_prompt(workflow, logger=None):
+		captured_workflow.update(workflow)
+		return "fake-prompt-id"
+	monkeypatch.setattr("run_vfx.submit_comfyui_prompt", fake_submit_comfyui_prompt)
+
+	async def fake_wait_for_comfyui_prompt(prompt_id, logger=None, timeout=3600.0):
+		return {"outputs": {"save": {"gifs": [{"filename": "x.mp4", "subfolder": ""}]}}}
+	monkeypatch.setattr("run_vfx.wait_for_comfyui_prompt", fake_wait_for_comfyui_prompt)
+
+	args = build_parser().parse_args([
+		"--mode", "video", "--auto-approve", "--prompt", "um teste", "--blocks-to-swap", "5",
+	])
+	rc = asyncio.run(orchestrate(args, TEST_LOGGER))
+	assert rc == 0
+	assert captured_workflow["blockswap_args"]["inputs"]["blocks_to_swap"] == 5
+
+
+def test_blocks_to_swap_flag_defaults_to_none_and_keeps_workflow_default(monkeypatch):
+	"""Sem --blocks-to-swap, o comportamento antigo se mantem - build_wan22_video_workflow()
+	usa o proprio padrao (20), testado e usado em producao ate hoje."""
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+
+	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
+		return None
+	monkeypatch.setattr("run_vfx.ensure_comfyui_running_under_jail", fake_ensure_comfyui_running_under_jail)
+
+	captured_workflow = {}
+
+	async def fake_submit_comfyui_prompt(workflow, logger=None):
+		captured_workflow.update(workflow)
+		return "fake-prompt-id"
+	monkeypatch.setattr("run_vfx.submit_comfyui_prompt", fake_submit_comfyui_prompt)
+
+	async def fake_wait_for_comfyui_prompt(prompt_id, logger=None, timeout=3600.0):
+		return {"outputs": {"save": {"gifs": [{"filename": "x.mp4", "subfolder": ""}]}}}
+	monkeypatch.setattr("run_vfx.wait_for_comfyui_prompt", fake_wait_for_comfyui_prompt)
+
+	args = build_parser().parse_args(["--mode", "video", "--auto-approve", "--prompt", "um teste"])
+	rc = asyncio.run(orchestrate(args, TEST_LOGGER))
+	assert rc == 0
+	assert captured_workflow["blockswap_args"]["inputs"]["blocks_to_swap"] == 20
 
 
 def test_free_comfyui_vram_does_not_raise_when_comfyui_unreachable():
@@ -681,7 +884,7 @@ async def _fake_confirm_yes(prompt):
 
 
 def test_master_mode_requires_original_and_processed_video(monkeypatch):
-	monkeypatch.setattr("run_vfx.confirm", _fake_confirm_yes)
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
 	args = build_parser().parse_args(["--mode", "master", "--auto-approve", "--output", "/tmp/saida.mkv"])
 	logger = logging.getLogger("test-master-missing-args")
 	logger.addHandler(logging.NullHandler())
@@ -690,7 +893,7 @@ def test_master_mode_requires_original_and_processed_video(monkeypatch):
 
 
 def test_master_mode_rejects_missing_input_files(monkeypatch, tmp_path):
-	monkeypatch.setattr("run_vfx.confirm", _fake_confirm_yes)
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
 	args = build_parser().parse_args([
 		"--mode", "master", "--auto-approve",
 		"--original", str(tmp_path / "nao_existe_original.mkv"),
@@ -709,7 +912,7 @@ def test_dry_run_full_pipeline_no_errors_and_no_prompts(monkeypatch):
 	def fail_if_called(*args, **kwargs):
 		raise AssertionError("confirm() nao deveria ser chamado em modo --dry-run")
 
-	monkeypatch.setattr("run_vfx.confirm", fail_if_called)
+	monkeypatch.setattr("vfx_gates.confirm", fail_if_called)
 	args = build_parser().parse_args(["--dry-run", "--mode", "faceswap"])
 	logger = logging.getLogger("test-dry-run")
 	logger.addHandler(logging.NullHandler())

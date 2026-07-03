@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from jobs import finish, job_upload_dir, new_job, save_upload, set_output
+from jobs import finish, job_upload_dir, new_job, save_uploads, set_output
 
 router = APIRouter()
 
@@ -17,8 +17,8 @@ async def create_faceswap_job(
 ):
 	job = new_job("faceswap")
 	upload_dir = job_upload_dir(job.id)
-	source_path = await save_upload(upload_dir, source)
-	target_path = await save_upload(upload_dir, target)
+	paths = await save_uploads(job, upload_dir, source=source, target=target)
+	source_path, target_path = paths["source"], paths["target"]
 	output_path = set_output(job, "resultado_" + os.path.basename(target_path))
 
 	extra_args = ["--source", source_path, "--target", target_path, "--output", output_path]

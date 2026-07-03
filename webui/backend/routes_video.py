@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from jobs import job_upload_dir, new_job, save_upload, set_output, finish
+from jobs import job_upload_dir, new_job, save_uploads, set_output, finish
 
 router = APIRouter()
 
@@ -26,9 +26,9 @@ async def create_video_job(
 		extra_args += ["--height", str(height)]
 	if num_frames:
 		extra_args += ["--num-frames", str(num_frames)]
-	if source_image is not None and source_image.filename:
-		source_image_path = await save_upload(upload_dir, source_image)
-		extra_args += ["--source-image", source_image_path]
+	paths = await save_uploads(job, upload_dir, source_image=source_image)
+	if "source_image" in paths:
+		extra_args += ["--source-image", paths["source_image"]]
 
 	output_path = set_output(job, "video_resultado.mp4")
 	extra_args += ["--output", output_path]

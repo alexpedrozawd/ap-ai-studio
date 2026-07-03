@@ -21,9 +21,13 @@ async def get_job(job_id: str):
 		"status": job.status,
 		"returncode": job.returncode,
 		"log_tail": job.log_lines[-LOG_TAIL_LINES:],
-		"output_ready": job.status == "done" and bool(job.output_path) and os.path.isfile(job.output_path),
+		"output_ready": (
+			job.status == "done" and job.output_path is not None and os.path.isfile(job.output_path)
+		),
 		"secondary_output_ready": (
-			job.status == "done" and bool(job.secondary_output_path) and os.path.isfile(job.secondary_output_path)
+			job.status == "done"
+			and job.secondary_output_path is not None
+			and os.path.isfile(job.secondary_output_path)
 		),
 	}
 

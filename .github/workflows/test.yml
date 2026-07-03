@@ -1,0 +1,64 @@
+name: Testes
+
+# Achado de auditoria (Engenheiro de Software): o projeto nao tinha CI nenhum - os
+# testes so' rodavam quando alguem lembrava de rodar na mao.
+#
+# TRANSPARENCIA IMPORTANTE (sem inventar cobertura que nao existe): este projeto roda
+# em cima de 5 ambientes Conda pesados (torch/CUDA, GPU NVIDIA real) e de caminhos
+# absolutos deste servidor especifico (~/miniconda3/envs/..., systemd --user session).
+# Um runner generico do GitHub Actions nao tem GPU, nao tem esses ambientes Conda, e
+# normalmente nao tem sessao systemd --user disponivel. Por isso este workflow roda o
+# que E' REALMENTE PORTAVEL (frontend inteiro, e os testes dos scripts standalone que
+# so' validam parsing de argumento) como jobs que TEM que passar, e roda o resto de
+# test_run_vfx.py como "melhor esforco" (continue-on-error) so' pra pegar regressao
+# grosseira de logica pura - varios desses testes vao falhar aqui por causa do
+# ambiente, isso e' esperado e nao significa bug real. A suite completa continua
+# rodando de verdade no servidor real antes de cada mudanca (ver PROMPT_MASTER.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    name: Frontend (Vitest + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webui/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - run: npm ci
+      - run: npx eslint src --max-warnings=0
+      - run: npm test
+      - run: npm run build
+
+  standalone-scripts:
+    name: Scripts standalone (parsing de argumentos, sem GPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest
+      - run: pytest test_standalone_scripts.py -v
+
+  orquestrador-melhor-esforco:
+    name: run_vfx.py (melhor esforco - ver comentario do workflow)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install pytest aiohttp
+      - run: pytest test_run_vfx.py -v

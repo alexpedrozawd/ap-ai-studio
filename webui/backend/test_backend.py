@@ -9,6 +9,15 @@ from config import JOB_OUTPUT_DIR, UPLOAD_DIR
 from jobs import JOBS, Job, cleanup_old_jobs
 from main import app
 
+# Assinaturas reais minimas de midia (achado de auditoria: jobs.py agora rejeita
+# upload cujo conteudo nao seja reconhecido como imagem/video/audio de verdade - ver
+# _reject_if_not_media - entao "fake-bytes" generico nao passa mais). Padding extra
+# garante que tambem servem pros testes de limite de tamanho.
+FAKE_JPEG_BYTES = bytes.fromhex("ffd8ffe000104a4649460001") + b"0" * 200
+FAKE_PNG_BYTES = bytes.fromhex("89504e470d0a1a0a0000000d49484452") + b"0" * 200
+FAKE_WAV_BYTES = b"RIFF" + b"\x24\x00\x00\x00" + b"WAVEfmt " + b"0" * 200
+FAKE_MP4_BYTES = bytes.fromhex("00000018") + b"ftypmp42" + b"0" * 200
+
 
 async def _wait_job_finished(client: httpx.AsyncClient, job_id: str, timeout: float = 15.0) -> dict:
 	deadline = time.monotonic() + timeout
@@ -84,8 +93,8 @@ def test_faceswap_dry_run_saves_uploads_and_completes_without_touching_gpu():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
 			files = {
-				"source": ("origem.jpg", b"fake-source-bytes", "image/jpeg"),
-				"target": ("alvo.jpg", b"fake-target-bytes", "image/jpeg"),
+				"source": ("origem.jpg", FAKE_JPEG_BYTES, "image/jpeg"),
+				"target": ("alvo.jpg", FAKE_JPEG_BYTES, "image/jpeg"),
 			}
 			resp = await client.post("/api/jobs/faceswap", data={"dry_run": "true"}, files=files)
 			assert resp.status_code == 200
@@ -139,11 +148,38 @@ def test_inpaint_dry_run_completes():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
 			files = {
-				"source_image": ("foto.png", b"fake-png-bytes", "image/png"),
-				"mask_image": ("mascara.png", b"fake-mask-bytes", "image/png"),
+				"source_image": ("foto.png", FAKE_PNG_BYTES, "image/png"),
+				"mask_image": ("mascara.png", FAKE_PNG_BYTES, "image/png"),
 			}
 			resp = await client.post(
 				"/api/jobs/inpaint", data={"prompt": "fundo azul", "dry_run": "true"}, files=files,
+			)
+			assert resp.status_code == 200
+			job_id = resp.json()["job_id"]
+			data = await _wait_job_finished(client, job_id)
+			assert data["status"] == "done"
+			assert data["returncode"] == 0
+			_cleanup_job(job_id)
+	asyncio.run(run())
+
+
+def test_inpaint_dry_run_completes_with_depth_controlnet_enabled():
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			files = {
+				"source_image": ("foto.png", FAKE_PNG_BYTES, "image/png"),
+				"mask_image": ("mascara.png", FAKE_PNG_BYTES, "image/png"),
+			}
+			resp = await client.post(
+				"/api/jobs/inpaint",
+				data={
+					"prompt": "fundo azul",
+					"use_depth_controlnet": "true",
+					"controlnet_strength": "0.8",
+					"dry_run": "true",
+				},
+				files=files,
 			)
 			assert resp.status_code == 200
 			job_id = resp.json()["job_id"]
@@ -167,7 +203,7 @@ def test_removebg_dry_run_completes():
 	async def run():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-			files = {"target": ("foto.jpg", b"fake-photo-bytes", "image/jpeg")}
+			files = {"target": ("foto.jpg", FAKE_JPEG_BYTES, "image/jpeg")}
 			resp = await client.post("/api/jobs/removebg", data={"dry_run": "true"}, files=files)
 			assert resp.status_code == 200
 			job_id = resp.json()["job_id"]
@@ -221,8 +257,8 @@ def test_dub_dry_run_does_not_spawn_subprocess():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
 			files = {
-				"audio": ("fala.wav", b"fake-wav-bytes", "audio/wav"),
-				"video": ("video.mp4", b"fake-mp4-bytes", "video/mp4"),
+				"audio": ("fala.wav", FAKE_WAV_BYTES, "audio/wav"),
+				"video": ("video.mp4", FAKE_MP4_BYTES, "video/mp4"),
 			}
 			resp = await client.post("/api/jobs/dub", data={"dry_run": "true"}, files=files)
 			assert resp.status_code == 200
@@ -249,7 +285,7 @@ def test_denoise_dry_run_completes_without_instrumental_by_default():
 	async def run():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-			files = {"target": ("audio.wav", b"fake-wav-bytes", "audio/wav")}
+			files = {"target": ("audio.wav", FAKE_WAV_BYTES, "audio/wav")}
 			resp = await client.post("/api/jobs/denoise", data={"dry_run": "true"}, files=files)
 			assert resp.status_code == 200
 			job_id = resp.json()["job_id"]
@@ -264,7 +300,7 @@ def test_denoise_with_instrumental_flag_sets_secondary_output_path():
 	async def run():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-			files = {"target": ("audio.wav", b"fake-wav-bytes", "audio/wav")}
+			files = {"target": ("audio.wav", FAKE_WAV_BYTES, "audio/wav")}
 			resp = await client.post(
 				"/api/jobs/denoise", data={"want_instrumental": "true", "dry_run": "true"}, files=files,
 			)
@@ -312,8 +348,8 @@ def test_master_dry_run_completes():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
 			files = {
-				"original": ("original.mp4", b"fake-original-bytes", "video/mp4"),
-				"processed_video": ("processado.mp4", b"fake-processed-bytes", "video/mp4"),
+				"original": ("original.mp4", FAKE_MP4_BYTES, "video/mp4"),
+				"processed_video": ("processado.mp4", FAKE_MP4_BYTES, "video/mp4"),
 			}
 			resp = await client.post("/api/jobs/master", data={"dry_run": "true"}, files=files)
 			assert resp.status_code == 200
@@ -334,7 +370,7 @@ def test_upload_above_max_size_is_rejected_with_413(monkeypatch):
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
 			files = {
-				"target": ("foto.jpg", b"conteudo bem maior que 10 bytes", "image/jpeg"),
+				"target": ("foto.jpg", FAKE_JPEG_BYTES, "image/jpeg"),  # bem maior que 10 bytes
 			}
 			resp = await client.post("/api/jobs/removebg", data={"dry_run": "true"}, files=files)
 			assert resp.status_code == 413
@@ -493,7 +529,176 @@ def test_save_upload_enforces_real_byte_limit_even_without_content_length(monkey
 	async def run():
 		transport = httpx.ASGITransport(app=app)
 		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-			files = {"target": ("grande.jpg", b"conteudo bem maior que 10 bytes de verdade", "image/jpeg")}
+			files = {"target": ("grande.jpg", FAKE_JPEG_BYTES, "image/jpeg")}  # bem maior que 10 bytes
 			resp = await client.post("/api/jobs/removebg", data={"dry_run": "true"}, files=files)
 			assert resp.status_code == 413
+	asyncio.run(run())
+
+
+# --- job "fantasma" quando o 2o arquivo de um upload multi-arquivo falha (achado de auditoria) ---
+
+def test_faceswap_partial_upload_failure_does_not_leave_orphaned_job_or_files():
+	"""Achado real (revisao de seguimento da auditoria): faceswap recebe 2 arquivos
+	(source, target). Antes da correcao, se 'source' fosse salvo com sucesso e 'target'
+	falhasse a validacao (ex.: filename ".."), o job ja criado ficava preso em
+	status="queued" pra sempre (launch() nunca era chamado) e o arquivo de 'source'
+	ficava orfao em disco - confirmado ao vivo contra o servidor rodando de verdade.
+	Agora save_uploads() desfaz o job inteiro (remove de JOBS, apaga upload_dir) se
+	qualquer upload da mesma requisicao falhar."""
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			jobs_before = set(JOBS.keys())
+			files = {
+				"source": ("origem.jpg", FAKE_JPEG_BYTES, "image/jpeg"),
+				"target": ("..", b"nome invalido", "image/jpeg"),
+			}
+			resp = await client.post("/api/jobs/faceswap", data={"dry_run": "true"}, files=files)
+			assert resp.status_code == 400
+
+			novos_jobs = set(JOBS.keys()) - jobs_before
+			assert novos_jobs == set(), "job nao deveria sobrar em JOBS apos falha parcial de upload"
+
+			# nenhuma pasta de upload nova deveria ter sobrevivido a falha
+			leftover_dirs = [
+				d for d in os.listdir(UPLOAD_DIR)
+				if os.path.isdir(os.path.join(UPLOAD_DIR, d))
+			]
+			for d in leftover_dirs:
+				# se sobrou alguma pasta, ela nao pode conter o arquivo "origem.jpg" que
+				# teria sido salvo com sucesso antes da falha do segundo upload
+				assert not os.path.isfile(os.path.join(UPLOAD_DIR, d, "origem.jpg"))
+	asyncio.run(run())
+
+
+def test_master_partial_upload_failure_does_not_leave_orphaned_job():
+	"""Mesmo achado do teste acima, aplicado a master (original + processed_video)."""
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			jobs_before = set(JOBS.keys())
+			files = {
+				"original": ("original.mp4", FAKE_MP4_BYTES, "video/mp4"),
+				"processed_video": (".", b"nome invalido", "video/mp4"),
+			}
+			resp = await client.post("/api/jobs/master", data={"dry_run": "true"}, files=files)
+			assert resp.status_code == 400
+			assert set(JOBS.keys()) == jobs_before
+	asyncio.run(run())
+
+
+def test_tts_upload_failure_does_not_leave_orphaned_output_dir():
+	"""Achado real (auditoria #3): routes_tts.py chamava set_output() ANTES de
+	save_uploads() - diferente das outras 7 rotas. job_output_path() cria a pasta de
+	saida como efeito colateral (os.makedirs) mesmo sem nenhum arquivo ainda existir,
+	entao um upload de speaker_wav que falhasse depois deixava uma pasta vazia orfa em
+	JOB_OUTPUT_DIR, mesmo com save_uploads() ja limpando o job e a pasta de upload.
+	Confirmado ao vivo antes da correcao. Corrigido invertendo a ordem."""
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			jobs_before = set(JOBS.keys())
+			dirs_before = set(os.listdir(JOB_OUTPUT_DIR)) if os.path.isdir(JOB_OUTPUT_DIR) else set()
+
+			files = {"speaker_wav": ("..", b"nome invalido", "audio/wav")}
+			resp = await client.post(
+				"/api/jobs/tts", data={"text": "teste", "dry_run": "true"}, files=files,
+			)
+			assert resp.status_code == 400
+			assert set(JOBS.keys()) == jobs_before
+
+			dirs_after = set(os.listdir(JOB_OUTPUT_DIR)) if os.path.isdir(JOB_OUTPUT_DIR) else set()
+			assert dirs_after == dirs_before, "nenhuma pasta de output nova deveria sobrar"
+	asyncio.run(run())
+
+
+# --- validacao de assinatura real do arquivo (achado da auditoria QA/Cybersecurity) ---
+
+def test_upload_rejects_file_that_is_not_recognized_as_media():
+	"""Achado de auditoria (perspectiva QA/Cybersecurity, pedido explicito de nao
+	exagerar na blindagem): um upload de texto puro disfarcado de .jpg passava direto
+	antes, e so' ia falhar la' na frente dentro do FFmpeg/FaceFusion com um erro tecnico
+	cru. Agora e' rejeitado cedo, com mensagem amigavel, verificando o CONTEUDO real do
+	arquivo (assinatura de bytes), nao so' o nome/extensao."""
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			files = {"target": ("foto.jpg", b"isso aqui e' so' texto, nao uma imagem de verdade", "image/jpeg")}
+			resp = await client.post("/api/jobs/removebg", data={"dry_run": "true"}, files=files)
+			assert resp.status_code == 400
+			assert "nao parece ser" in resp.json()["detail"].lower()
+	asyncio.run(run())
+
+
+def test_upload_accepts_real_media_regardless_of_declared_content_type_header():
+	"""A checagem e' pela assinatura real dos bytes, nao pelo cabecalho Content-Type
+	que o cliente declara (facil de estar errado ou ser mentiroso) - um arquivo PNG de
+	verdade e' aceito mesmo se o cliente disser 'image/jpeg' por engano."""
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			files = {"target": ("foto.jpg", FAKE_PNG_BYTES, "image/jpeg")}
+			resp = await client.post("/api/jobs/removebg", data={"dry_run": "true"}, files=files)
+			assert resp.status_code == 200
+			job_id = resp.json()["job_id"]
+			data = await _wait_job_finished(client, job_id)
+			assert data["status"] == "done"
+			_cleanup_job(job_id)
+	asyncio.run(run())
+
+
+def test_upload_rejects_non_media_even_with_empty_content():
+	"""Arquivo vazio (0 bytes) e' deixado passar pela checagem de assinatura (nao ha'
+	nada pra' inspecionar) - vai falhar mais na frente, no proprio run_vfx.py/FaceFusion,
+	com um erro claro de arquivo vazio, nao um 400 confuso de 'tipo invalido'."""
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			files = {"target": ("vazio.jpg", b"", "image/jpeg")}
+			resp = await client.post("/api/jobs/removebg", data={"dry_run": "true"}, files=files)
+			# dry-run nao chega a processar o conteudo de verdade - so' confirma que nao
+			# foi rejeitado erroneamente como "tipo invalido" na validacao de upload
+			assert resp.status_code == 200
+			job_id = resp.json()["job_id"]
+			await _wait_job_finished(client, job_id)
+			_cleanup_job(job_id)
+	asyncio.run(run())
+
+
+# --- upscale standalone (pedido do usuario, auditoria de uso profissional) ---
+
+def test_upscale_missing_file_is_rejected():
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			resp = await client.post("/api/jobs/upscale", data={})
+			assert resp.status_code == 422
+	asyncio.run(run())
+
+
+def test_upscale_dry_run_completes():
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			files = {"target": ("foto.jpg", FAKE_JPEG_BYTES, "image/jpeg")}
+			resp = await client.post("/api/jobs/upscale", data={"dry_run": "true"}, files=files)
+			assert resp.status_code == 200
+			job_id = resp.json()["job_id"]
+			data = await _wait_job_finished(client, job_id)
+			assert data["status"] == "done"
+			_cleanup_job(job_id)
+	asyncio.run(run())
+
+
+def test_upscale_with_fps_for_video():
+	async def run():
+		transport = httpx.ASGITransport(app=app)
+		async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+			files = {"target": ("cena.mp4", FAKE_MP4_BYTES, "video/mp4")}
+			resp = await client.post("/api/jobs/upscale", data={"dry_run": "true", "fps": "30"}, files=files)
+			assert resp.status_code == 200
+			job_id = resp.json()["job_id"]
+			data = await _wait_job_finished(client, job_id)
+			assert data["status"] == "done"
+			_cleanup_job(job_id)
 	asyncio.run(run())

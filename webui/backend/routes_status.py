@@ -25,10 +25,15 @@ async def comfyui_up() -> bool:
 		return False
 
 
+NVIDIA_SMI_PATH = "/usr/bin/nvidia-smi"
+
+
 def _vram_info() -> Optional[dict]:
+	# Achado do SAST (bandit B607): caminho absoluto em vez de depender do PATH -
+	# evita que um PATH manipulado troque o binario real por um falso.
 	try:
 		out = subprocess.check_output(
-			["nvidia-smi", "--query-gpu=memory.used,memory.free,memory.total", "--format=csv,noheader,nounits"],
+			[NVIDIA_SMI_PATH, "--query-gpu=memory.used,memory.free,memory.total", "--format=csv,noheader,nounits"],
 			text=True, timeout=5,
 		)
 		used, free, total = (int(x) for x in out.strip().splitlines()[0].split(","))

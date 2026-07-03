@@ -54,6 +54,35 @@ describe("JobLogPanel", () => {
     await waitFor(() => expect(onFinished).toHaveBeenCalledTimes(1));
   });
 
+  it("mostra uma mensagem amigavel quando o log bate com um erro conhecido (Gate de VRAM)", async () => {
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: "abc",
+      mode: "video",
+      status: "error",
+      returncode: 1,
+      log_tail: ["Pipeline abortado: Gate 2 negado pelo usuario"],
+      output_ready: false,
+      secondary_output_ready: false,
+    });
+    render(<JobLogPanel jobId="abc" />);
+    expect(await screen.findByText(/VRAM/i)).toBeInTheDocument();
+  });
+
+  it("nao mostra mensagem amigavel quando o log nao bate com nenhum padrao conhecido", async () => {
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: "abc",
+      mode: "video",
+      status: "error",
+      returncode: 1,
+      log_tail: ["algo deu errado, sem padrao reconhecido"],
+      output_ready: false,
+      secondary_output_ready: false,
+    });
+    render(<JobLogPanel jobId="abc" />);
+    expect(await screen.findByText("erro")).toBeInTheDocument();
+    expect(screen.queryByText(/VRAM|RAM insuficiente|disco insuficiente/i)).not.toBeInTheDocument();
+  });
+
   it("mostra alerta de erro quando a consulta ao job falha", async () => {
     vi.spyOn(api, "getJob").mockRejectedValue(new Error("rede fora do ar"));
     render(<JobLogPanel jobId="abc" />);

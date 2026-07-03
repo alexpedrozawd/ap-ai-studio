@@ -20,6 +20,7 @@ from routes_music import router as music_router
 from routes_removebg import router as removebg_router
 from routes_status import router as status_router
 from routes_tts import router as tts_router
+from routes_upscale import router as upscale_router
 from routes_video import router as video_router
 
 CLEANUP_INTERVAL_SECONDS = 6 * 3600
@@ -94,6 +95,7 @@ app.include_router(dub_router, prefix="/api")
 app.include_router(denoise_router, prefix="/api")
 app.include_router(music_router, prefix="/api")
 app.include_router(master_router, prefix="/api")
+app.include_router(upscale_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")

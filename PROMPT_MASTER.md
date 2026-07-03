@@ -358,9 +358,194 @@ correções, com reexploração ao vivo confirmando o fechamento antes de seguir
 próxima. 109 testes no total após esta rodada (103 + 6 novos: 3 de path traversal + 2 de
 filename inválido + 1 de limite via streaming, ver tabela abaixo).
 
+**Auditoria multi-perspectiva (2026-07-03) — código, SO, QA/segurança e uso
+profissional, cada uma com nota própria — e correções aplicadas em seguida:**
+1. **`LICENSE`** adicionado — todos os direitos reservados (uso privado, decisão do
+   usuário; MIT/Apache permitiria redistribuição, o que contradiz o objetivo do
+   projeto).
+2. **`requirements/`** — `pip freeze` real dos 5 ambientes Conda (`vfx-pipeline` 190
+   pacotes, `facefusion-pipeline` 75, `tts-pipeline` 110, `noise-pipeline` 62,
+   `webui-pipeline` 44) + `webui/backend/requirements.txt`. Antes, recriar qualquer
+   ambiente exigia garimpar comandos `pip install` na prosa deste documento.
+3. **`CHANGELOG.md`** — histórico por data/versão, reconstruído do `git log` real.
+4. **`.github/workflows/test.yml` + `.pre-commit-config.yaml`** — CI e lint local
+   (`ruff`/`eslint`, só detecção de erro, sem reformatar o código com TAB do projeto).
+   Transparência importante: o CI roda de verdade (e tem que passar) só o que é
+   portável (frontend inteiro, scripts standalone) — o resto de `test_run_vfx.py` roda
+   como "melhor esforço" porque depende de GPU/ambientes Conda/sessão `systemd --user`
+   deste servidor especifico, que um runner genérico não tem.
+5. **Validação de assinatura real do arquivo no upload** (achado QA/Cybersecurity,
+   pedido explícito de não exagerar na blindagem) — biblioteca `filetype` (pura
+   Python), rejeita com mensagem amigável qualquer upload cujo conteúdo real não seja
+   reconhecido como imagem/vídeo/áudio, antes de chegar no FFmpeg/FaceFusion com um
+   erro técnico cru. Verificação pelo conteúdo, não pelo nome/Content-Type declarado.
+6. **`run_vfx.py` dividido em 7 módulos** (achado Engenheiro de Software: monólito de
+   ~1500 linhas) — `vfx_config.py`, `vfx_core.py`, `vfx_gates.py`, `vfx_comfyui.py`,
+   `vfx_workflows.py`, `vfx_facefusion.py`, `vfx_ffmpeg.py`. `run_vfx.py` caiu pra 405
+   linhas, vira só o orquestrador, reexportando tudo dos módulos pra `from run_vfx
+   import X` continuar funcionando sem mudança em quem já consome (atalhos `vfx-*`,
+   webui, testes). **Achado real da própria migração:** os testes que usavam
+   `monkeypatch.setattr("run_vfx.confirm", ...)` pararam de funcionar — `confirm()`
+   agora é *chamado* de dentro de `vfx_gates.py`, então o patch precisa mirar
+   `vfx_gates.confirm` (onde o nome é resolvido em tempo de execução), não
+   `run_vfx.confirm` (que só teria efeito se a chamada também estivesse em
+   `run_vfx.py`). Mesma lógica pra `get_vram_free_mb`/`get_disk_free_gb`/etc. Já os
+   patches de `ensure_comfyui_running_under_jail`/`submit_comfyui_prompt`/
+   `wait_for_comfyui_prompt` continuam em `run_vfx.X` sem mudança, porque essas
+   chamadas ficam dentro de `orchestrate()`, que continua em `run_vfx.py`. Testado:
+   62 testes de `test_run_vfx.py` passando sem alteração de comportamento (só de
+   *onde* cada patch mira), e um job real (`removebg`) de ponta a ponta pela API
+   depois da divisão.
+7. **`--mode upscale` novo** (achado do perfil "uso profissional/edição de IA": não
+   havia upscale standalone pra fotos antigas — só o de dentro do modo `video`,
+   embutido no fluxo de geração). Reaproveita o mesmo `RealESRGAN_x4plus.pth` já
+   baixado, via os nodes nativos do ComfyUI `UpscaleModelLoader` +
+   `ImageUpscaleWithModel` (confirmados ao vivo no `/object_info` antes de implementar).
+   Aceita imagem (`LoadImage`/`SaveImage`) ou vídeo (`VHS_LoadVideo`/`VHS_VideoCombine`,
+   detectado pela extensão via `is_video_file()`) — mesmo grafo, sem gerar nada novo, só
+   amplia 4x o que já existe (custo baixo: nenhuma dependência nova, modelo de 64MB já
+   em disco). Exposto também na webui (`POST /api/jobs/upscale`, página "Aumentar
+   Resolução" no dropdown Imagem). Testado ao vivo ponta a ponta duas vezes: direto via
+   CLI (1024×1024 → 4096×4096) e depois pela própria webui em produção (imagem
+   256×256 → 1024×1024 real, sem `--dry-run`, confirmado pelo tamanho do arquivo
+   baixado via `GET /api/jobs/{id}/output`). 6 testes novos em `test_run_vfx.py`
+   (workflow de imagem/vídeo, detecção de extensão, validação de `--target`/`--output`)
+   e 3 em `test_backend.py` (arquivo faltando, dry-run com imagem, dry-run com vídeo
+   passando `fps`).
+
+8. **Comparação antes/depois na webui** (achado do perfil uso profissional) —
+   `BeforeAfterCompare.tsx`, componente reaproveitado nas 4 páginas que editam algo já
+   existente (Trocar Rosto, Remover Fundo, Editar Imagem, Aumentar Resolução), lado a
+   lado, usando `URL.createObjectURL()` no arquivo original que já está no navegador
+   (sem re-upload). Não entra nas páginas de geração do zero (Gerar Vídeo, Música),
+   onde não existe "antes". Achado colateral corrigido no processo:
+   `RemoveBgPage.tsx` sempre mostrava o resultado como `<img>`, mesmo com alvo em
+   vídeo — corrigido junto, já que a comparação precisa detectar o tipo certo pra
+   funcionar.
+9. **Aviso "modo rascunho, não produção"** direto na página "Gerar Vídeo" da webui
+   (além do reforço já feito no `MANUAL_USO.md`, seção 0 e 4.4) — deixa explícito o
+   teto de 720×720/poucos segundos e aponta pra "Trocar Rosto" (produção) ou "Aumentar
+   Resolução" (upscale de algo pronto) quando o objetivo é qualidade final.
+10. **Processamento em lote** (achado do perfil uso profissional) —
+    `BatchJobQueue.tsx`, novo componente reaproveitado nas páginas "Aumentar Resolução"
+    e "Remover Fundo": selecionar mais de um arquivo no campo de upload entra em modo
+    lote automaticamente (o fluxo de um único arquivo não muda em nada). Processa **em
+    fila sequencial, não em paralelo** — decisão deliberada, já que não há limite de
+    concorrência entre jobs e a GPU é compartilhada com o Ollama; rodar vários jobs
+    pesados ao mesmo tempo disputaria VRAM sem coordenação. Cada arquivo da fila tem
+    seu próprio painel de log/status/antes-depois/download, e um arquivo que falhar
+    (ex.: tipo de arquivo inválido) não trava o resto da fila. Testado ao vivo pela
+    webui em produção com 2 arquivos reais — confirmado pelos timestamps do log que o
+    2º job só começou depois do 1º terminar (sequencial de verdade, não só na
+    aparência).
+11. **Mensagens de erro amigáveis** (achado do perfil uso profissional/iniciante) —
+    `src/lib/friendlyErrors.ts` reconhece os padrões de erro mais comuns nos logs
+    (Gates 1/2/3 negados, código de saída 137/-9 de OOM-kill, timeout do ComfyUI, erro
+    de execução do ComfyUI) e mostra uma frase simples em português acima do log
+    técnico — que continua completo e visível, nada é escondido. Erros sem padrão
+    reconhecido não mostram nenhuma mensagem extra (não arrisca um palpite errado
+    sobre a causa).
+12. **`webui/frontend/e2e/`** (achado das perspectivas de Código e QA) — formaliza a
+    verificação visual manual (Chrome headless real) que antes era um script
+    descartável criado e apagado na hora. Cobre rotas estáticas (regressão de layout)
+    e um fluxo real de upscale de ponta a ponta (confirma visualmente a comparação
+    antes/depois). Deliberadamente fora do CI/pre-commit — ferramenta manual.
+13. **`--blocks-to-swap` (avançado, opcional) no modo `video`** — experimento real de
+    velocidade pedido pelo usuário, motivado por ele nunca rodar o Ollama e o
+    `ap-ai-studio` ao mesmo tempo (fecha um antes de abrir o outro). **Correção de uma
+    suposição anterior:** o block swap do Wan2.2 **não existe principalmente por causa
+    do Ollama** — os dois experts MoE (HighNoise+LowNoise) somam ~19.3GB de peso
+    sozinhos, mais que os 16GB da RTX 5060 Ti, então algum grau de offload pra CPU é
+    obrigatório mesmo com a VRAM inteira livre. Medido ao vivo, comparando
+    `blocks_to_swap` (padrão `20`) contra valores menores, sempre no mesmo hardware:
+
+    | `blocks_to_swap` | Resolução | Frames | Tempo | Pico VRAM |
+    |---|---|---|---|---|
+    | 20 (padrão) | 320×320 | 17 | 126,4s | 7,65GB |
+    | 5 | 320×320 | 17 | 84,2s (-33%) | 9,76GB |
+    | 0 | 320×320 | 17 | 78,2s (-38%) | 10,66GB |
+    | 5 | 480×480 | 17 | 147,4s | 9,92GB |
+    | 5 | 480×480 | 81 (~5s) | 618,8s | 11,87GB |
+    | 5 | 480×480 | **161 (~10s, padrão real)** | **travou o ComfyUI (OOM real, processo morreu, precisou religar via `/api/comfyui/start`)** | — |
+
+    **Conclusão:** `blocks_to_swap=5` dá ~33-38% de ganho real de velocidade e é seguro
+    até por volta de 80 quadros em 480×480, mas **não escala** pro `--num-frames`
+    padrão (161) na mesma resolução — o crescimento de VRAM com mais quadros não é
+    linear (a extrapolação a partir dos pontos menores previa ~14GB de pico aos 161
+    quadros; na prática estourou os 16GB antes disso). Por isso o **padrão de
+    `blocks_to_swap` continua `20`** (seguro, já usado em produção) — a opção mais
+    rápida foi exposta como flag avançada (`--blocks-to-swap N`), não como novo
+    padrão, com aviso explícito no `--help` e no `MANUAL_USO.md` sobre o risco em
+    renders longos.
+14. **ControlNet Depth no modo `inpaint`** (`--use-depth-controlnet`, opcional, achado
+    do perfil uso profissional, autorizado explicitamente pelo usuário após ver as
+    opções) — guia a edição por um mapa de profundidade (MiDaS) da própria imagem
+    original, via ControlNet SDXL, além da máscara manual. Instalação real: pacote de
+    nós `comfyui_controlnet_aux` (Fannovel16, repositório nomeado e autorizado pelo
+    usuário antes do clone — código de terceiros que o ComfyUI carrega
+    automaticamente) em `ComfyUI/custom_nodes/`, dependências extras instaladas no
+    `vfx-pipeline` (scikit-image, mediapipe, fvcore, omegaconf, onnxruntime-gpu, entre
+    outras — `torch`/`torchvision` não foram tocados, confirmado intacto depois:
+    `2.12.1+cu130`, CUDA disponível) + modelo `controlnet-depth-sdxl-1.0.safetensors`
+    (2,4GB, `diffusers/controlnet-depth-sdxl-1.0`, fp16) em
+    `models_hub/models/controlnet/`. Novo `build_inpaint_workflow(use_depth_controlnet=
+    True, controlnet_strength=0.6)` adiciona 3 nodes (`MiDaS-DepthMapPreprocessor` →
+    `ControlNetLoader` → `ControlNetApplyAdvanced`) e realimenta o `KSampler` com o
+    condicionamento resultante; sem a flag, o grafo fica byte-a-byte igual ao de antes
+    (nenhum node novo, nenhuma mudança de comportamento). Também exposto na webui
+    (checkbox "Avançado" em "Editar Imagem"). Testado ao vivo, três vezes:
+    (1) CLI com a foto oficial de exemplo do FaceFusion, comparando com/sem a flag no
+    mesmo prompt — pipeline roda sem erro nas duas (~12s sem, ~15s com, overhead real
+    mas pequeno); honestamente, a máscara usada nesse teste caiu numa região de pouca
+    variação de profundidade (borda do cabelo/fundo desfocado), então a diferença
+    visual entre com/sem ControlNet não ficou dramaticamente clara nesse caso
+    específico — o pipeline funciona, mas esse teste não foi o melhor showcase do
+    valor da feature em si;
+    (2) webui em produção, job real via `POST /api/jobs/inpaint` com
+    `use_depth_controlnet=true`, concluído com sucesso (`status: done`,
+    `returncode: 0`);
+    (3) teste melhor-escolhido, usando a foto de amostra `coffee` do `scikit-image`
+    (xícara sobre mesa de madeira, perspectiva real e nítida — já instalada como
+    dependência do `comfyui_controlnet_aux`, sem precisar de foto do usuário nem
+    download da internet), mascarando o canto de fundo (mesa recuando na perspectiva)
+    e comparando o mesmo prompt com/sem a flag: diferença real e visível, porém
+    modesta — o grão da madeira na região editada ficou mais alinhado com a
+    perspectiva da mesa na versão com ControlNet, mas a linha de costura da máscara
+    continua visível nas duas versões (ControlNet ajuda a manter a coerência
+    estrutural da cena, não elimina sozinho artefato de blend na borda da máscara).
+15. **Correção da costura visível na borda da máscara do `inpaint`** (achado real do
+    item #14, item #3 do teste) — duas causas reais, corrigidas juntas, sempre ativas
+    (não são flag opcional, é correção de qualidade):
+    - `FeatherMask` suaviza a borda da máscara (parâmetro novo `feather_amount`,
+      padrão `24px`) antes de virar latente — transição gradual em vez de corte duro.
+    - `ImageCompositeMasked` cola o resultado gerado de volta na **imagem original**,
+      não na imagem inteira redecodificada pelo VAE — a área fora da máscara deixa de
+      sofrer a leve deriva de cor/textura que o round-trip encode→sample→decode do
+      VAE introduzia em toda a imagem, mesmo na parte "mantida".
+    Verificado com números reais, não só visualmente: comparando pixel a pixel uma
+    região bem longe da máscara (foto `coffee` do `scikit-image`) antes e depois do
+    resultado — **diferença média de pixel caiu pra 0.0, diferença máxima 0** (era uma
+    deriva pequena mas real antes). A costura visual também ficou mais suave no mesmo
+    teste. Ambos os nodes (`FeatherMask`, `ImageCompositeMasked`) já existem no
+    ComfyUI core — nenhuma dependência nova.
+
+**Nota registrada, não uma ação (achado do perfil SO/DevOps + uso profissional):** o
+teto de `MAX_VIDEO_WIDTH`/`MAX_VIDEO_HEIGHT` = 720×720 em `vfx_config.py` existe porque
+é o que cabe com folga nos 16GB de VRAM da RTX 5060 Ti atual sem risco de OOM durante a
+geração do zero (modo `video`) — não é um limite arbitrário de software. Se a GPU for
+trocada por uma com mais VRAM no futuro, vale revisitar esse valor (e os parâmetros de
+block-swap/offload associados) pra aproveitar a capacidade nova; até lá, o novo
+`--mode upscale` já cobre o caso de "eu queria mais resolução" pra fotos/vídeos prontos
+sem precisar mexer nesse teto.
+
+**Limpeza de disco (2026-07-03, a pedido do usuário):** ver a entrada correspondente na
+tabela de referência rápida abaixo (`Disco`) — removidos `Battle.net`/`World of
+Warcraft` (123GB) e dados de usuário do Lutris (3GB) do mesmo NVMe compartilhado com o
+SO, liberando 126GB (de 105GB pra 230GB livres). Nada do `ap-ai-studio` foi tocado.
+
 ---
 
-**Referência rápida (consolidada Fases 0-11, verificada ao vivo em 2026-07-03, pós-auditoria + varredura de segurança):**
+**Referência rápida (consolidada Fases 0-11, verificada ao vivo em 2026-07-03, pós-auditoria multi-perspectiva + `--mode upscale`):**
 Esta seção não substitui o histórico acima — é só um resumo de "onde as coisas estão"
 pra não precisar garimpar os achados de cada fase toda vez.
 
@@ -373,17 +558,18 @@ pra não precisar garimpar os achados de cada fase toda vez.
 | `noise-pipeline` | `demucs_separate.py` (Demucs) | precisa torch 2.12.1+cu130 + `torchcodec` |
 | `webui-pipeline` | `webui/backend/` (FastAPI/uvicorn) | Só `fastapi`/`uvicorn`/`aiohttp` — não precisa do torch pesado do `vfx-pipeline` |
 
-*Modos do `run_vfx.py` (`--mode`, ver `build_parser()` em `run_vfx.py:1438`):*
+*Modos do `run_vfx.py` (`--mode`, ver `build_parser()` em `run_vfx.py:386`):*
 | `--mode` | O que faz | Flags relevantes |
 |---|---|---|
 | `faceswap` | Troca de rosto (FaceFusion, modo referência); com `--chunk-seconds`, processa vídeo longo em pedaços | `--source --target --output [--chunk-seconds N]` |
-| `video` | Geração T2V ou I2V (Wan2.2, GGUF Q4_K_M) | `--prompt [--source-image] [--width --height --num-frames]` |
+| `video` | Geração T2V ou I2V (Wan2.2, GGUF Q4_K_M) — qualidade "rascunho", 720×720 no máximo | `--prompt [--source-image] [--width --height --num-frames]` |
 | `master` | Costura final CFR + bt709, remapeia áudio/legendas do original pro vídeo processado | `--original --processed-video --output [--fps]` |
 | `inpaint` | Edição de imagem com máscara manual (SDXL inpainting) | `--source-image --mask-image --output [--prompt]` (sem `--prompt`: aviso, não erro) |
 | `removebg` | Remoção de fundo (FaceFusion `background_remover`) | `--target --output` |
 | `tts` | Síntese de fala / clonagem de voz (XTTS-v2) | `--text --output (--speaker \| --speaker-wav obrigatório) [--language]` |
 | `denoise` | Isola voz / separa de ruído-fundo (Demucs) | `--target --output [--output-instrumental]` |
 | `music` | Geração de música (MusicGen) | `--prompt --output [--music-duration]` |
+| `upscale` | Aumenta resolução 4x de foto/vídeo pronto (Real-ESRGAN, standalone) | `--target --output [--fps]` (fps só usado se `--target` for vídeo) |
 
 *Modelos baixados (`/home/ap/ai_pipeline/models_hub/models/`, ~42.6GB total confirmado por `du -h` em 2026-07-02):*
 - `diffusion_models/`: Wan2.2 T2V-A14B e I2V-A14B, GGUF Q4_K_M, HighNoise+LowNoise cada (4 arquivos, ~9GB cada, ~36GB)
@@ -392,15 +578,35 @@ pra não precisar garimpar os achados de cada fase toda vez.
 - `frame_interpolation/rife_v4.25.safetensors` (22MB)
 - `upscale_models/RealESRGAN_x4plus.pth` (64MB)
 - `checkpoints/sd_xl_base_1.0_inpainting_0.1.safetensors` (6.5GB)
-- Disco (`/`, NVMe compartilhado com o SO): 340GB usados / 105GB livres de 468GB (77%) em 2026-07-03.
+- `controlnet/controlnet-depth-sdxl-1.0.safetensors` (2,4GB, novo em 2026-07-03 — ver
+  achado #14 acima). Pesos do pré-processador MiDaS baixados automaticamente pelo
+  `comfyui_controlnet_aux` no primeiro uso (não contabilizados aqui ainda).
+- Disco (`/`, NVMe compartilhado com o SO): ~224,9GB livres de 468GB em 2026-07-03 (após
+  o ControlNet) — subiu de 105GB pra 230GB depois que o usuário pediu a remoção do
+  Battle.net/World of Warcraft (`/home/ap/Games/battlenet`, 123GB) e do Lutris (dados de
+  usuário, 3GB) do mesmo disco, e caiu ~5GB de volta com o download do ControlNet + libs.
+  Nada relacionado ao ap-ai-studio foi tocado na limpeza de disco. O pacote flatpak do
+  Lutris em si (não os dados de usuário) continua instalado a nível de sistema — remover
+  exige `sudo`, que este agente não tem configurado sem senha; comando pra o usuário
+  rodar se quiser completar: `sudo flatpak uninstall net.lutris.Lutris`.
 
-*Testes (109 no total, todos passando, verificado ao vivo em 2026-07-03 pós-varredura de segurança):*
+*Testes (160 no total, todos passando, verificado ao vivo em 2026-07-03 pós correção da costura de mascara no inpaint):*
 | Suite | Testes | O que cobre |
 |---|---|---|
-| `test_run_vfx.py` | 62 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`) |
+| `test_run_vfx.py` | 74 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`). Roda contra os 7 módulos `vfx_*.py` via `run_vfx.py` (reexport). Inclui 6 testes do `--mode upscale`, 2 do `--blocks-to-swap`, 3 do ControlNet Depth no inpaint e 1 do feathering/composição da máscara. |
 | `test_standalone_scripts.py` | 6 | `tts_synthesize.py`/`demucs_separate.py` via subprocesso real (validação de argumentos, sem precisar da GPU/modelos) |
-| `webui/backend/test_backend.py` | 34 | Contrato de API, jobs reais com `--dry-run` via subprocesso real, middleware de limite de upload/disco, limpeza automática, path traversal na SPA, validação de filename, limite de upload via streaming |
-| `webui/frontend/src/**/*.test.tsx` | 7 | Vitest + React Testing Library — painel de log/status de job, validação de formulário |
+| `webui/backend/test_backend.py` | 44 | Contrato de API, jobs reais com `--dry-run` via subprocesso real, middleware de limite de upload/disco, limpeza automática, path traversal na SPA, validação de filename, limite de upload via streaming, validação de assinatura real do arquivo, job "fantasma" em upload multi-arquivo, rota `/jobs/upscale`, rota `/jobs/inpaint` com ControlNet |
+| `webui/frontend/src/**/*.test.tsx` | 36 | Vitest + React Testing Library — painel de log/status de job, validação de formulário, `BeforeAfterCompare.tsx` isolado (4 testes), estado "job concluído" nas 4 páginas com antes/depois (14 testes), `friendlyErrors.ts` (7 testes) + mensagem amigável no `JobLogPanel` (2 testes), `BatchJobQueue.tsx` isolado (3 testes) + modo lote em `UpscalePage`/`RemoveBgPage` (2 testes), checkbox de ControlNet no `InpaintPage` (1 teste) |
+
+Verificação visual manual formalizada em `webui/frontend/e2e/` (Chrome headless real,
+fora do CI/pre-commit) — substitui o script descartável usado na primeira verificação
+visual desta sessão.
+
+Checagem de tipo leve (`mypy --ignore-missing-imports`, hook `pre-commit` não-bloqueante,
+achado de auditoria) cobre todo o Python do projeto (`run_vfx.py` + 7 módulos `vfx_*.py`
++ `webui/backend/*.py` + os dois arquivos de teste do orquestrador) e está limpa —
+achou e corrigiu 4 pontos de `Optional` não comprovado em tempo de execução
+(`vfx_ffmpeg.py`, `webui/backend/jobs.py`, `webui/backend/routes_jobs.py`).
 
 *Estado do repositório:* as correções da auditoria de sistema e da varredura de
 segurança (2026-07-02/03 — supervisão systemd, limites de upload/disco, limpeza

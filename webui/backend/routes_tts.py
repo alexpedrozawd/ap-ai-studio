@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from jobs import finish, job_upload_dir, new_job, save_upload, set_output
+from jobs import finish, job_upload_dir, new_job, save_uploads, set_output
 
 router = APIRouter()
 
@@ -21,12 +21,19 @@ async def create_tts_job(
 
 	job = new_job("tts")
 	upload_dir = job_upload_dir(job.id)
-	output_path = set_output(job, "fala_gerada.wav")
-
-	extra_args = ["--text", text, "--language", language, "--output", output_path]
+	# Achado de auditoria (revisao de seguimento): set_output() estava sendo chamado
+	# ANTES do upload - job_output_path() cria a pasta de saida como efeito colateral
+	# (os.makedirs), entao se o upload falhasse depois, sobrava uma pasta vazia orfa em
+	# JOB_OUTPUT_DIR mesmo com save_uploads() ja limpando o job e a pasta de upload.
+	# Confirmado ao vivo. Corrigido: upload primeiro (pode falhar e desfazer o job
+	# inteiro via save_uploads), set_output() so' depois - mesma ordem das outras 7 rotas.
+	extra_args = ["--text", text, "--language", language]
 	if speaker:
 		extra_args += ["--speaker", speaker]
 	if has_speaker_wav:
-		speaker_wav_path = await save_upload(upload_dir, speaker_wav)
-		extra_args += ["--speaker-wav", speaker_wav_path]
+		paths = await save_uploads(job, upload_dir, speaker_wav=speaker_wav)
+		extra_args += ["--speaker-wav", paths["speaker_wav"]]
+
+	output_path = set_output(job, "fala_gerada.wav")
+	extra_args += ["--output", output_path]
 	return finish(job, extra_args, dry_run)

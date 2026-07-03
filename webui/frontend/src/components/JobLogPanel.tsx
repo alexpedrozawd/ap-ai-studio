@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Badge, Spinner } from "react-bootstrap";
 import { getJob } from "../api";
 import type { JobStatusResponse } from "../api";
+import { friendlyErrorMessage } from "../lib/friendlyErrors";
 
 interface Props {
   jobId: string | null;
@@ -77,6 +78,8 @@ export default function JobLogPanel({ jobId, onFinished }: Props) {
     );
   }
 
+  const friendlyMessage = job.status === "error" ? friendlyErrorMessage(job.log_tail) : null;
+
   return (
     <div className="mt-3">
       <div className="d-flex align-items-center gap-2 mb-2">
@@ -86,6 +89,11 @@ export default function JobLogPanel({ jobId, onFinished }: Props) {
           <span className="text-muted small">codigo de saida: {job.returncode}</span>
         )}
       </div>
+      {friendlyMessage && (
+        <Alert variant="warning" className="mb-2">
+          {friendlyMessage}
+        </Alert>
+      )}
       <pre
         ref={logRef}
         className="bg-dark text-light p-2 rounded"

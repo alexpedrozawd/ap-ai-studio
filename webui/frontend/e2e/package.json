@@ -1,0 +1,13 @@
+{
+  "name": "webui-e2e-manual",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Verificacao visual manual da webui (Chrome headless real, nao mockado). Fora do CI/pre-commit de proposito - roda so' quando alguem decide conferir visualmente.",
+  "scripts": {
+    "check": "node visual-check.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.3.0"
+  }
+}

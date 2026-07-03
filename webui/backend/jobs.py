@@ -16,11 +16,13 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
+import filetype
 from fastapi import HTTPException, UploadFile
 
 from config import JOB_OUTPUT_DIR, JOB_RETENTION_DAYS, MAX_UPLOAD_BYTES, UPLOAD_DIR, VFX_PY, VFX_SCRIPT
 
 MAX_LOG_LINES = 2000
+FILE_SIGNATURE_PEEK_BYTES = 261  # filetype.guess() so' precisa dos primeiros 261 bytes
 
 
 @dataclass
@@ -66,6 +68,29 @@ def set_output(job: Job, filename: str) -> str:
 	return path
 
 
+async def _reject_if_not_media(upload: UploadFile) -> None:
+	"""Achado de auditoria (perspectiva QA/Cybersecurity, pedido explicito de nao
+	exagerar na blindagem): nao havia nenhuma checagem de que o arquivo enviado e' de
+	fato uma midia - um upload de .txt/.pdf/.exe passava direto e so' falhava la' na
+	frente, dentro do FFmpeg/FaceFusion, com um erro tecnico cru no log. Detecta pela
+	assinatura real dos bytes (nao pela extensao do nome, que e' facil de estar errada
+	ou ser mentirosa) via a biblioteca 'filetype' (pura Python, sem dependencia de
+	sistema). De proposito permissivo: aceita QUALQUER coisa que a assinatura reconheca
+	como imagem/video/audio, nao uma lista fechada de formatos - o objetivo e' barrar
+	engano obvio (arquivo errado), nao fazer controle de formato."""
+	header = await upload.read(FILE_SIGNATURE_PEEK_BYTES)
+	await upload.seek(0)
+	if not header:
+		return  # arquivo vazio - deixa passar, vai falhar mais na frente com erro claro
+	kind = filetype.guess(header)
+	if kind is None or not kind.mime.startswith(("image/", "video/", "audio/")):
+		raise HTTPException(
+			400,
+			"Esse arquivo nao parece ser uma imagem, video ou audio valido "
+			"(verificado pelo conteudo real do arquivo, nao so' pelo nome).",
+		)
+
+
 async def save_upload(dest_dir: str, upload: UploadFile) -> str:
 	"""Salva um arquivo enviado via multipart. os.path.basename() descarta qualquer
 	componente de diretorio do nome original - o arquivo sempre cai dentro de dest_dir,
@@ -75,30 +100,65 @@ async def save_upload(dest_dir: str, upload: UploadFile) -> str:
 	aponta pro diretorio pai - open(..., "wb") falhava com IsADirectoryError nao tratada
 	(500 cru). Nao e' um escape de verdade (so' sobe um nivel, ainda dentro da propria
 	arvore da aplicacao), mas e' entrada nao validada causando crash - rejeitada
-	explicitamente agora com 400 antes de chegar no open()."""
-	filename = os.path.basename(upload.filename or "arquivo")
-	if not filename or filename in (".", ".."):
-		raise HTTPException(400, "Nome de arquivo invalido.")
-	dest_path = os.path.join(dest_dir, filename)
-	# Achado de auditoria: o middleware de main.py so' checa o cabecalho Content-Length -
-	# confirmado ao vivo que um cliente pode omiti-lo (Transfer-Encoding: chunked) e
-	# passar direto por aquela checagem. Contamos os bytes de verdade aqui, na hora de
-	# gravar, e abortamos assim que passar do limite - nao da' pra mentir sobre o
-	# tamanho real dos bytes que estao sendo escritos em disco.
-	written = 0
+	explicitamente agora com 400 antes de chegar no open().
+
+	Achado de auditoria #2 (revisao de seguimento): o cleanup de arquivo parcial so'
+	rodava pra HTTPException, e upload.close() nunca era chamado nos caminhos de erro
+	(so' no sucesso) - um erro de I/O generico (ex.: disco enchendo no meio da gravacao)
+	deixava lixo em disco e o UploadFile aberto. Agora: qualquer excecao limpa o arquivo
+	parcial, e upload.close() roda sempre, garantido pelo finally."""
 	try:
-		with open(dest_path, "wb") as f:
-			while chunk := await upload.read(1024 * 1024):
-				written += len(chunk)
-				if written > MAX_UPLOAD_BYTES:
-					raise HTTPException(413, f"Upload maior que o limite de {MAX_UPLOAD_BYTES // (1024**3)}GB.")
-				f.write(chunk)
-	except HTTPException:
-		if os.path.isfile(dest_path):
-			os.remove(dest_path)
+		filename = os.path.basename(upload.filename or "arquivo")
+		if not filename or filename in (".", ".."):
+			raise HTTPException(400, "Nome de arquivo invalido.")
+		await _reject_if_not_media(upload)
+		dest_path = os.path.join(dest_dir, filename)
+		# Achado de auditoria: o middleware de main.py so' checa o cabecalho
+		# Content-Length - confirmado ao vivo que um cliente pode omiti-lo
+		# (Transfer-Encoding: chunked) e passar direto por aquela checagem. Contamos os
+		# bytes de verdade aqui, na hora de gravar, e abortamos assim que passar do
+		# limite - nao da' pra mentir sobre o tamanho real dos bytes escritos em disco.
+		written = 0
+		try:
+			with open(dest_path, "wb") as f:
+				while chunk := await upload.read(1024 * 1024):
+					written += len(chunk)
+					if written > MAX_UPLOAD_BYTES:
+						raise HTTPException(413, f"Upload maior que o limite de {MAX_UPLOAD_BYTES // (1024**3)}GB.")
+					f.write(chunk)
+		except Exception:
+			if os.path.isfile(dest_path):
+				os.remove(dest_path)
+			raise
+		return dest_path
+	finally:
+		await upload.close()
+
+
+async def save_uploads(job: Job, upload_dir: str, **uploads: Optional[UploadFile]) -> dict[str, str]:
+	"""Salva um ou mais uploads pro mesmo job, numa unidade so'. Achado de auditoria
+	(revisao de seguimento, confirmado ao vivo): as rotas de job criavam o job
+	(new_job()) ANTES de salvar qualquer arquivo, e salvavam um upload de cada vez sem
+	nada em volta - se o primeiro upload fosse aceito e o segundo falhasse (filename
+	invalido, tamanho excedido), o job ja criado nunca era disparado (launch() nunca
+	chamado) e ficava preso em status="queued" pra sempre (so' seria limpo dali a 7
+	dias por cleanup_old_jobs), com o arquivo do primeiro upload orfao em disco.
+	Reproduzido de proposito: upload de 2 arquivos com o segundo filename=".." deixava
+	exatamente esse rastro. Agora, qualquer falha durante os uploads desfaz o job por
+	completo (remove de JOBS e apaga upload_dir inteiro) antes de propagar o erro -
+	nao existe mais estado parcial "pendurado". Uploads=None (campo opcional nao
+	enviado, ex.: --source-image do modo video) sao ignorados sem erro."""
+	saved: dict[str, str] = {}
+	try:
+		for name, upload in uploads.items():
+			if upload is None or not upload.filename:
+				continue
+			saved[name] = await save_upload(upload_dir, upload)
+	except Exception:
+		JOBS.pop(job.id, None)
+		shutil.rmtree(upload_dir, ignore_errors=True)
 		raise
-	await upload.close()
-	return dest_path
+	return saved
 
 
 async def _stream_output(job: Job, stream: asyncio.StreamReader) -> None:
@@ -125,6 +185,7 @@ async def _run(job: Job, cmd: list[str], cwd: Optional[str], env: Optional[dict]
 			proc.stdin.write(b"y\n" * 5)
 			await proc.stdin.drain()
 			proc.stdin.close()
+		assert proc.stdout is not None  # stdout=PIPE acima garante um StreamReader
 		await _stream_output(job, proc.stdout)
 		returncode = await proc.wait()
 		job.returncode = returncode

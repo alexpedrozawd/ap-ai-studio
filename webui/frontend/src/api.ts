@@ -98,6 +98,8 @@ export interface InpaintJobParams {
   sourceImage: File;
   maskImage: File;
   prompt?: string;
+  useDepthControlnet?: boolean;
+  controlnetStrength?: number;
   dryRun?: boolean;
 }
 
@@ -106,6 +108,10 @@ export async function createInpaintJob(params: InpaintJobParams): Promise<JobCre
   form.append("source_image", params.sourceImage);
   form.append("mask_image", params.maskImage);
   if (params.prompt) form.append("prompt", params.prompt);
+  if (params.useDepthControlnet) {
+    form.append("use_depth_controlnet", "true");
+    form.append("controlnet_strength", String(params.controlnetStrength ?? 0.6));
+  }
   if (params.dryRun) form.append("dry_run", "true");
   return handleResponse(await fetch(`${API_BASE}/jobs/inpaint`, { method: "POST", body: form }));
 }
@@ -196,6 +202,20 @@ export async function createMasterJob(params: MasterJobParams): Promise<JobCreat
   if (params.fps) form.append("fps", String(params.fps));
   if (params.dryRun) form.append("dry_run", "true");
   return handleResponse(await fetch(`${API_BASE}/jobs/master`, { method: "POST", body: form }));
+}
+
+export interface UpscaleJobParams {
+  target: File;
+  fps?: number;
+  dryRun?: boolean;
+}
+
+export async function createUpscaleJob(params: UpscaleJobParams): Promise<JobCreateResponse> {
+  const form = new FormData();
+  form.append("target", params.target);
+  if (params.fps) form.append("fps", String(params.fps));
+  if (params.dryRun) form.append("dry_run", "true");
+  return handleResponse(await fetch(`${API_BASE}/jobs/upscale`, { method: "POST", body: form }));
 }
 
 export async function getJob(jobId: string): Promise<JobStatusResponse> {
