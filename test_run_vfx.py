@@ -44,6 +44,7 @@ from run_vfx import (
 	get_video_duration_seconds,
 	is_video_file,
 	orchestrate,
+	process_long_upscale,
 	run_in_memory_jail,
 	split_video_into_chunks,
 	stage_image_for_comfyui,
@@ -347,6 +348,48 @@ def test_facefusion_command_uses_its_own_conda_env_python_not_bare_python():
 	assert cmd[0] != "python"
 	assert "facefusion-pipeline" in cmd[0]
 	assert cmd[0].endswith("/bin/python")
+
+
+def test_facefusion_command_uses_stable_landmarker_and_occlusion_mask_by_default():
+	"""Achado real (Jurassic Park, 2026-07-04): lente de oculos de sol "piscava" em angulo
+	lateral por jitter do landmarker padrao (2dfan4); o ensemble 'many' + mascara de
+	oclusao/regiao corrigiu, testado ao vivo quadro a quadro. Isso deve valer por padrao pra
+	qualquer face-swap, nao so' quando alguem lembrar de passar a flag manualmente."""
+	cmd = build_facefusion_command("/tmp/source.jpg", "/tmp/target.mp4", "/tmp/output.mp4")
+
+	assert cmd[cmd.index("--face-landmarker-model") + 1] == "many"
+	assert cmd[cmd.index("--face-occluder-model") + 1] == "many"
+
+	mask_idx = cmd.index("--face-mask-types")
+	mask_types = []
+	for value in cmd[mask_idx + 1:]:
+		if value.startswith("--"):
+			break
+		mask_types.append(value)
+	assert mask_types == ["box", "occlusion", "region"]
+
+
+def test_facefusion_command_without_gender_keeps_reference_mode_and_position():
+	"""Sem face_selector_gender, comportamento inalterado: modo reference + posicao (nao
+	depende de filtro de genero/idade pra escolher o alvo - fronteira de seguranca do
+	projeto, ver PROMPT_MASTER.md)."""
+	cmd = build_facefusion_command("/tmp/source.jpg", "/tmp/target.mp4", "/tmp/output.mp4", reference_face_position=1)
+
+	assert cmd[cmd.index("--face-selector-mode") + 1] == "reference"
+	assert cmd[cmd.index("--reference-face-position") + 1] == "1"
+	assert "--face-selector-gender" not in cmd
+
+
+def test_facefusion_command_with_gender_switches_to_one_mode():
+	"""Achado real (Jurassic Park, cena com duas pessoas adultas, 2026-07-04): o modo
+	`reference` sozinho perdia ou trocava o rosto errado numa cena com mais de uma pessoa.
+	Passar face_selector_gender troca pro modo `one` filtrado por genero - so' desambigua
+	homem-vs-mulher adultos no quadro, nao mexe em nenhum filtro de idade/protecao."""
+	cmd = build_facefusion_command("/tmp/source.jpg", "/tmp/target.mp4", "/tmp/output.mp4", face_selector_gender="female")
+
+	assert cmd[cmd.index("--face-selector-mode") + 1] == "one"
+	assert cmd[cmd.index("--face-selector-gender") + 1] == "female"
+	assert "--reference-face-position" not in cmd
 
 
 def test_musicgen_workflow_chains_generation_and_save():
@@ -994,6 +1037,103 @@ def test_get_video_duration_reads_real_duration(tmp_path):
 	_make_test_video(str(source), duration=3)
 	duration = asyncio.run(get_video_duration_seconds(str(source)))
 	assert 2.5 <= duration <= 3.5
+
+
+# --- Upscale de video longo em pedacos (achado real: OOM ao vivo com video inteiro num lote) ---
+
+def _make_test_video_with_audio(path: str, duration: int) -> None:
+	cmd = [
+		"ffmpeg", "-y",
+		"-f", "lavfi", "-i", f"testsrc=duration={duration}:size=160x160:rate=10",
+		"-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}",
+		"-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path,
+	]
+	subprocess.run(cmd, capture_output=True, check=True)
+
+
+def _has_audio_stream(path: str) -> bool:
+	out = subprocess.run(
+		["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", path],
+		capture_output=True, text=True, check=True,
+	)
+	return bool(out.stdout.strip())
+
+
+def test_process_long_upscale_single_chunk_remuxes_audio(monkeypatch, tmp_path):
+	"""Achado real (OOM confirmado ao vivo): o modo upscale de video processava o video
+	inteiro num so lote (estourou a jaula de 24G num clipe de 26s/625 frames, morto pelo OOM
+	killer) e nunca remontava o audio original - o node VHS_VideoCombine so recebe 'images'.
+	Este teste finge as chamadas ao ComfyUI (evita precisar de um servidor de verdade rodando)
+	mas roda o ffmpeg de verdade pra confirmar que o audio do original aparece no arquivo
+	final mesmo quando a "saida do ComfyUI" simulada nao tem audio nenhum - e' exatamente o
+	sintoma que o usuario ia ver sem essa correcao."""
+	monkeypatch.setattr("vfx_ffmpeg.stage_image_for_comfyui", lambda path: "staged.mp4")
+
+	source = tmp_path / "origem_3s.mp4"
+	_make_test_video_with_audio(str(source), duration=3)
+
+	fake_upscaled = tmp_path / "fake_upscaled_sem_audio.mp4"
+	subprocess.run(
+		["ffmpeg", "-y", "-i", str(source), "-an", "-c:v", "copy", str(fake_upscaled)],
+		capture_output=True, check=True,
+	)
+	assert not _has_audio_stream(str(fake_upscaled))
+
+	async def fake_submit(workflow, logger=None):
+		return "fake-prompt-id"
+	monkeypatch.setattr("vfx_ffmpeg.submit_comfyui_prompt", fake_submit)
+
+	async def fake_wait(prompt_id, logger=None, timeout=1800.0):
+		return {"outputs": {"save": {"gifs": [{"filename": fake_upscaled.name, "subfolder": ""}]}}}
+	monkeypatch.setattr("vfx_ffmpeg.wait_for_comfyui_prompt", fake_wait)
+	monkeypatch.setattr("vfx_ffmpeg.get_comfyui_output_file", lambda history_entry: str(fake_upscaled))
+
+	output = tmp_path / "saida_upscalada.mp4"
+	rc = asyncio.run(process_long_upscale(
+		str(source), str(output), chunk_seconds=10, output_fps=10.0, logger=TEST_LOGGER,
+	))
+
+	assert rc == 0
+	assert output.is_file()
+	assert _has_audio_stream(str(output))
+
+
+def test_process_long_upscale_splits_into_chunks_when_video_exceeds_limit(monkeypatch, tmp_path):
+	"""Mesmo achado do teste acima, mas cobrindo o caminho de video LONGO: um clipe de 6s com
+	limite de 2s por pedaco deve disparar >=3 chamadas ao ComfyUI (uma por pedaco, nunca o
+	video inteiro de uma vez) e o resultado remontado deve ter duracao proxima da original."""
+	monkeypatch.setattr("vfx_ffmpeg.stage_image_for_comfyui", lambda path: "staged.mp4")
+
+	source = tmp_path / "origem_6s.mp4"
+	_make_test_video_with_audio(str(source), duration=6)
+
+	call_count = {"n": 0}
+
+	async def fake_submit(workflow, logger=None):
+		call_count["n"] += 1
+		return f"fake-prompt-{call_count['n']}"
+	monkeypatch.setattr("vfx_ffmpeg.submit_comfyui_prompt", fake_submit)
+
+	async def fake_wait(prompt_id, logger=None, timeout=1800.0):
+		return {"outputs": {"save": {"gifs": [{"filename": "irrelevante.mp4", "subfolder": ""}]}}}
+	monkeypatch.setattr("vfx_ffmpeg.wait_for_comfyui_prompt", fake_wait)
+
+	def fake_get_output(history_entry):
+		fake_path = tmp_path / f"fake_out_{call_count['n']}.mp4"
+		_make_test_video_with_audio(str(fake_path), duration=2)
+		return str(fake_path)
+	monkeypatch.setattr("vfx_ffmpeg.get_comfyui_output_file", fake_get_output)
+
+	output = tmp_path / "saida_dividida.mp4"
+	rc = asyncio.run(process_long_upscale(
+		str(source), str(output), chunk_seconds=2, output_fps=10.0, logger=TEST_LOGGER,
+	))
+
+	assert rc == 0
+	assert output.is_file()
+	assert call_count["n"] >= 3
+	duration = asyncio.run(get_video_duration_seconds(str(output)))
+	assert 5.0 <= duration <= 7.0
 
 
 async def _fake_confirm_yes(prompt):

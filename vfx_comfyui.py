@@ -95,6 +95,19 @@ async def ensure_comfyui_running_under_jail(
 		logger.info(f"ComfyUI ja esta rodando dentro do scope {COMFYUI_SCOPE_UNIT}, reaproveitando.")
 		return
 
+	# Achado real (OOM ao vivo, 2026-07-04): depois que o systemd mata o scope (OOM ou
+	# qualquer outro motivo), a unit transiente fica em estado "failed" e o systemd recusa
+	# recriar uma unit com o MESMO nome ("was already loaded or has a fragment file") -
+	# o systemd-run abaixo falhava silenciosamente (erro so' ia pro log do ComfyUI, nao pro
+	# log do run_vfx.py) e o ComfyUI nunca subia, ate' alguem rodar 'systemctl --user
+	# reset-failed' manualmente. reset-failed e' inofensivo se a unit nao existir ou nao
+	# estiver em failed - sempre seguro rodar antes de tentar subir de novo.
+	reset = await asyncio.create_subprocess_exec(
+		"systemctl", "--user", "reset-failed", COMFYUI_SCOPE_UNIT,
+		stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+	)
+	await reset.communicate()
+
 	if not check_port_free(COMFYUI_PORT):
 		logger.info(f"Encerrando instancia do ComfyUI fora da jaula (porta {COMFYUI_PORT} ocupada) antes de reiniciar presa.")
 		if check_binary("fuser"):

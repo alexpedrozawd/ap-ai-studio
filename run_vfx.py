@@ -130,6 +130,7 @@ from vfx_ffmpeg import (  # noqa: F401
 	concat_video_chunks,
 	get_video_duration_seconds,
 	process_long_faceswap,
+	process_long_upscale,
 	sanitize_exif,
 	split_video_into_chunks,
 )
@@ -344,15 +345,25 @@ async def orchestrate(args: argparse.Namespace, logger: logging.Logger) -> int:
 		await ensure_comfyui_running_under_jail(
 			memory_max=memory_cfg["memory_max"], memory_swap_max=memory_cfg["memory_swap_max"], logger=logger,
 		)
-		staged = stage_image_for_comfyui(args.target)
 		is_video = is_video_file(args.target)
-		workflow = build_upscale_workflow(staged_filename=staged, is_video=is_video, output_fps=args.fps)
-		prompt_id = await submit_comfyui_prompt(workflow, logger=logger)
-		history_entry = await wait_for_comfyui_prompt(prompt_id, logger=logger, timeout=1800.0)
-		comfyui_output_path = get_comfyui_output_file(history_entry)
-		shutil.copy(comfyui_output_path, args.output)
-		logger.info(f"Upscale concluido: {args.output}")
-		return 0
+		if not is_video:
+			# Imagem unica: um so' frame, sem risco de OOM por lote nem audio a preservar.
+			staged = stage_image_for_comfyui(args.target)
+			workflow = build_upscale_workflow(staged_filename=staged, is_video=False, output_fps=args.fps)
+			prompt_id = await submit_comfyui_prompt(workflow, logger=logger)
+			history_entry = await wait_for_comfyui_prompt(prompt_id, logger=logger, timeout=1800.0)
+			comfyui_output_path = get_comfyui_output_file(history_entry)
+			shutil.copy(comfyui_output_path, args.output)
+			logger.info(f"Upscale concluido: {args.output}")
+			return 0
+
+		# Video: processado em pedacos (achado real - ver process_long_upscale) e remontado
+		# com o audio original. --chunk-seconds default de 8s se o usuario nao passar nada,
+		# pra nao repetir o OOM confirmado ao vivo com o video inteiro num lote so.
+		returncode = await process_long_upscale(
+			args.target, args.output, chunk_seconds=args.chunk_seconds or 8, output_fps=args.fps, logger=logger,
+		)
+		return returncode
 
 	if not args.source or not args.target or not args.output:
 		logger.error("Modo faceswap requer --source, --target e --output")
@@ -369,6 +380,7 @@ async def orchestrate(args: argparse.Namespace, logger: logging.Logger) -> int:
 			returncode = await process_long_faceswap(
 				args.source, args.target, args.output, original_for_audio=args.target,
 				memory_cfg=memory_cfg, chunk_seconds=args.chunk_seconds, logger=logger,
+				face_selector_gender=args.face_selector_gender,
 			)
 		except (RuntimeError, GateDenied) as exc:
 			logger.error(f"Processamento em pedacos falhou: {exc}")
@@ -379,7 +391,7 @@ async def orchestrate(args: argparse.Namespace, logger: logging.Logger) -> int:
 		return 0
 
 	env = build_facefusion_env()
-	cmd = build_facefusion_command(args.source, args.target, args.output)
+	cmd = build_facefusion_command(args.source, args.target, args.output, face_selector_gender=args.face_selector_gender)
 	returncode, stdout, stderr = await run_in_memory_jail(
 		cmd,
 		memory_max=memory_cfg["memory_max"],
@@ -400,6 +412,12 @@ def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(description="AP AI Studio - orquestrador do pipeline VFX")
 	parser.add_argument("--mode", choices=["faceswap", "video", "master", "inpaint", "removebg", "tts", "denoise", "music", "upscale"], default="faceswap")
 	parser.add_argument("--source", type=str, default=None)
+	parser.add_argument(
+		"--face-selector-gender", choices=["male", "female"], default=None,
+		help="Modo faceswap: desambigua qual rosto trocar em cenas com mais de uma pessoa "
+		"(ex.: duas pessoas adultas no mesmo quadro) sem depender de reference-face-position/"
+		"distancia entre frames - nao tem relacao com o filtro de protecao/idade do FaceFusion.",
+	)
 	parser.add_argument("--target", type=str, default=None, help="Foto/video de destino (faceswap/removebg/denoise) ou a aumentar de resolucao (modo upscale)")
 	parser.add_argument("--output", type=str, default=None)
 	parser.add_argument("--dry-run", action="store_true")
@@ -420,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
 		"--controlnet-strength", type=float, default=0.6,
 		help="Forca do ControlNet de profundidade no modo inpaint (0=ignora, 1=segue rigidamente a profundidade original)",
 	)
-	parser.add_argument("--chunk-seconds", type=int, default=None, help="Processa video longo (modo faceswap) em pedacos de N segundos")
+	parser.add_argument("--chunk-seconds", type=int, default=None, help="Processa video longo (modo faceswap ou upscale) em pedacos de N segundos (upscale usa 8s por padrao se omitido, pra evitar OOM)")
 	parser.add_argument("--text", type=str, default=None, help="Texto a sintetizar (modo tts)")
 	parser.add_argument("--language", type=str, default="pt", help="Idioma da fala (modo tts)")
 	parser.add_argument("--speaker", type=str, default=None, help="Nome de uma voz embutida do XTTS-v2 (modo tts)")

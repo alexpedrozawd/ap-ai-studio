@@ -1,5 +1,5 @@
 """FFmpeg (masterizacao final, corte/juncao de video em pedacos), higiene de EXIF, e
-o processamento de faceswap em video longo que combina tudo isso com o Gate 1.
+o processamento de faceswap/upscale em video longo que combina tudo isso com o Gate 1.
 """
 
 import asyncio
@@ -10,10 +10,17 @@ import shutil
 import uuid
 from typing import Optional
 
+from vfx_comfyui import (
+	get_comfyui_output_file,
+	stage_image_for_comfyui,
+	submit_comfyui_prompt,
+	wait_for_comfyui_prompt,
+)
 from vfx_config import DISK_SAFETY_MARGIN_GB, GateDenied, PIPELINE_PATH
 from vfx_core import check_binary
 from vfx_facefusion import build_facefusion_command, build_facefusion_env
 from vfx_gates import get_disk_free_gb, run_in_memory_jail
+from vfx_workflows import build_upscale_workflow
 
 
 # --- Higiene de metadados EXIF ---
@@ -128,16 +135,21 @@ async def concat_video_chunks(chunk_paths: list[str], output_path: str, logger: 
 async def process_long_faceswap(
 	source_path: str, target_video_path: str, final_output_path: str, original_for_audio: str,
 	memory_cfg: dict, chunk_seconds: int, logger: logging.Logger,
+	face_selector_gender: Optional[str] = None,
 ) -> int:
 	"""Processa uma cena/filme inteiro rodando o face-swap pedaco por pedaco (evita carregar
 	o video inteiro de uma vez na jaula de memoria do Gate 1), remonta os pedacos processados
 	e costura com o audio/legendas do original via Fase 4. Cada pedaco roda dentro da MESMA
 	jaula de memoria calculada pelo Gate 1 - nao e um teto por pedaco, e o mesmo teto do
-	processo inteiro, entao pedacos menores = menos chance de estourar por pedaco."""
+	processo inteiro, entao pedacos menores = menos chance de estourar por pedaco.
+
+	`face_selector_gender` repassa pro `build_facefusion_command` (ver achado real #2 la') -
+	util em cenas com mais de uma pessoa, onde o modo `reference` sozinho pode perder o rosto
+	certo ou pegar o errado por engano."""
 	duration = await get_video_duration_seconds(target_video_path)
 	if duration <= chunk_seconds:
 		logger.info(f"Video ({duration:.1f}s) cabe num unico pedaco (limite {chunk_seconds}s) - processando sem dividir.")
-		cmd = build_facefusion_command(source_path, target_video_path, final_output_path)
+		cmd = build_facefusion_command(source_path, target_video_path, final_output_path, face_selector_gender=face_selector_gender)
 		returncode, stdout, stderr = await run_in_memory_jail(
 			cmd, memory_max=memory_cfg["memory_max"], memory_swap_max=memory_cfg["memory_swap_max"],
 			cwd=os.path.join(PIPELINE_PATH, "facefusion"), env=build_facefusion_env(), logger=logger,
@@ -156,7 +168,7 @@ async def process_long_faceswap(
 		processed_path = os.path.join(chunk_dir, "processed", f"chunk_{i:04d}.mp4")
 		os.makedirs(os.path.dirname(processed_path), exist_ok=True)
 		logger.info(f"Processando pedaco {i + 1}/{len(raw_chunks)}: {raw_chunk}")
-		cmd = build_facefusion_command(source_path, raw_chunk, processed_path)
+		cmd = build_facefusion_command(source_path, raw_chunk, processed_path, face_selector_gender=face_selector_gender)
 		returncode, stdout, stderr = await run_in_memory_jail(
 			cmd, memory_max=memory_cfg["memory_max"], memory_swap_max=memory_cfg["memory_swap_max"],
 			cwd=os.path.join(PIPELINE_PATH, "facefusion"), env=build_facefusion_env(), logger=logger,
@@ -178,4 +190,80 @@ async def process_long_faceswap(
 
 	shutil.rmtree(chunk_dir, ignore_errors=True)
 	logger.info(f"Processamento em {len(raw_chunks)} pedacos concluido: {final_output_path}")
+	return 0
+
+
+# --- Upscale de video longo em pedacos (achado real: OOM confirmado ao vivo) ---
+# O modo upscale (ImageUpscaleWithModel) carrega o video INTEIRO como um unico lote de
+# frames na VRAM/RAM antes de processar - ao contrario do FaceFusion, que streama frame a
+# frame. Um teste ao vivo com um clipe de 26s/625 frames em 640x360 (saida 4x = 2560x1440)
+# estourou a jaula de memoria padrao (24G, mesma do Gate 1 pra modo != "video") e foi morto
+# pelo OOM killer aos ~10min, sem gerar nenhuma saida (journalctl: "Failed with result
+# 'oom-kill'", memory peak 24.0G). Corrigido dividindo em pedacos (mesmo padrao ja usado em
+# process_long_faceswap) - cada pedaco carrega só os frames daquele trecho de uma vez.
+# Tambem corrige um bug separado: o modo upscale de video nunca remuxava o audio original
+# (build_upscale_workflow so' passa "images" pro VHS_VideoCombine) - o video upscalado saia
+# mudo mesmo no caminho de pedaco unico. Agora sempre remonta com o audio/legendas originais
+# via build_ffmpeg_mastering_command, igual ao faceswap.
+
+async def _run_single_upscale_chunk(
+	target_path: str, output_path: str, is_video: bool, output_fps: float, logger: logging.Logger,
+) -> None:
+	staged = stage_image_for_comfyui(target_path)
+	workflow = build_upscale_workflow(staged_filename=staged, is_video=is_video, output_fps=output_fps)
+	prompt_id = await submit_comfyui_prompt(workflow, logger=logger)
+	history_entry = await wait_for_comfyui_prompt(prompt_id, logger=logger, timeout=1800.0)
+	comfyui_output_path = get_comfyui_output_file(history_entry)
+	shutil.copy(comfyui_output_path, output_path)
+
+
+async def process_long_upscale(
+	target_video_path: str, final_output_path: str, chunk_seconds: int, output_fps: float, logger: logging.Logger,
+) -> int:
+	"""Processa o upscale 4x de um video pedaco por pedaco (evita carregar o video inteiro
+	de uma vez na jaula de memoria - ver achado acima), remonta os pedacos e costura de volta
+	com o audio/legendas do original."""
+	duration = await get_video_duration_seconds(target_video_path)
+	if not chunk_seconds or duration <= chunk_seconds:
+		if chunk_seconds:
+			logger.info(f"Video ({duration:.1f}s) cabe num unico pedaco (limite {chunk_seconds}s) - processando sem dividir.")
+		upscaled_path = f"{final_output_path}.sem_audio.mp4"
+		await _run_single_upscale_chunk(target_video_path, upscaled_path, is_video=True, output_fps=output_fps, logger=logger)
+		master_cmd = build_ffmpeg_mastering_command(target_video_path, upscaled_path, final_output_path, fps=output_fps)
+		proc = await asyncio.create_subprocess_exec(*master_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+		_, stderr = await proc.communicate()
+		os.remove(upscaled_path)
+		if proc.returncode != 0:
+			logger.error(f"Masterizacao final do upscale falhou: {stderr.decode(errors='ignore')}")
+			return proc.returncode
+		logger.info(f"Upscale concluido (audio remontado): {final_output_path}")
+		return 0
+
+	chunk_dir = os.path.join(PIPELINE_PATH, "tmp", f"upscale_chunks_{uuid.uuid4().hex[:8]}")
+	logger.info(f"Video de {duration:.1f}s excede o limite de {chunk_seconds}s por pedaco - dividindo antes do upscale.")
+	raw_chunks = await split_video_into_chunks(target_video_path, chunk_seconds, os.path.join(chunk_dir, "raw"), logger)
+
+	processed_chunks = []
+	for i, raw_chunk in enumerate(raw_chunks):
+		free_gb = get_disk_free_gb("/")
+		if free_gb < DISK_SAFETY_MARGIN_GB:
+			raise GateDenied(f"Gate 3: espaco insuficiente no meio do upscale em pedacos ({free_gb:.1f}GB livres)")
+		processed_path = os.path.join(chunk_dir, "processed", f"chunk_{i:04d}.mp4")
+		os.makedirs(os.path.dirname(processed_path), exist_ok=True)
+		logger.info(f"Upscale do pedaco {i + 1}/{len(raw_chunks)}: {raw_chunk}")
+		await _run_single_upscale_chunk(raw_chunk, processed_path, is_video=True, output_fps=output_fps, logger=logger)
+		processed_chunks.append(processed_path)
+
+	concatenated_path = os.path.join(chunk_dir, "concatenado.mp4")
+	await concat_video_chunks(processed_chunks, concatenated_path, logger)
+
+	master_cmd = build_ffmpeg_mastering_command(target_video_path, concatenated_path, final_output_path, fps=output_fps)
+	proc = await asyncio.create_subprocess_exec(*master_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+	_, stderr = await proc.communicate()
+	if proc.returncode != 0:
+		logger.error(f"Masterizacao final dos pedacos de upscale falhou: {stderr.decode(errors='ignore')}")
+		return proc.returncode
+
+	shutil.rmtree(chunk_dir, ignore_errors=True)
+	logger.info(f"Upscale em {len(raw_chunks)} pedacos concluido (audio remontado): {final_output_path}")
 	return 0
