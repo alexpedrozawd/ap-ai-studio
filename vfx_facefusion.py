@@ -19,22 +19,56 @@ from vfx_core import build_subprocess_env
 
 # --- FaceFusion (modo de rosto de referência) ---
 
-def build_facefusion_command(source_path: str, target_path: str, output_path: str, reference_face_position: int = 0) -> list[str]:
+def build_facefusion_command(
+	source_path: str, target_path: str, output_path: str,
+	reference_face_position: int = 0,
+	face_selector_gender: Optional[str] = None,
+) -> list[str]:
 	"""Achado real (primeiro face-swap end-to-end): usar so 'python' aqui resolve pro
 	interprete do ambiente Conda que estiver ativo no processo do run_vfx.py (vfx-pipeline,
 	do ComfyUI) - onde nao existe onnxruntime instalado. FaceFusion vive num ambiente Conda
 	SEPARADO (facefusion-pipeline, ver Fase 1). Preciso do caminho explicito do interprete
-	desse outro ambiente, nao do 'python' generico do PATH herdado."""
+	desse outro ambiente, nao do 'python' generico do PATH herdado.
+
+	Achado real #2 (cena com duas pessoas, Jurassic Park, 2026-07-04): o modo `reference`
+	sozinho (posicao + distancia padrao) e' fragil em cenas com mais de um rosto - a
+	referencia extraida de UM frame especifico as vezes nao bate (por angulo/pose) com o
+	MESMO rosto em outros frames da cena (distancia > 0.3), fazendo o swap sumir em trechos
+	inteiros, e quando a distancia e' afrouxada pra compensar, o rosto ERRADO (a outra
+	pessoa da cena) pode ser capturado por engano se a deteccao ficar ruidosa. Pra cenas com
+	mais de uma pessoa, passar `face_selector_gender` ("male"/"female") troca pro modo `one`
+	filtrado por genero - mais robusto pra esse caso (nao depende de casar identidade entre
+	frames), sem tocar em nenhum filtro de idade/protecao do FaceFusion (a fronteira de
+	seguranca do projeto continua intacta: isso e' so' desambiguar homem-vs-mulher adultos
+	numa cena, nao um jeito de contornar o age-analyzer). Sem genero passado, comportamento
+	inalterado (modo `reference` + posicao, como sempre foi).
+
+	Achado real #3 (mesma sessao): a lente dos oculos de sol "piscava" (aparecia/sumia a
+	cada poucos frames) especificamente em angulo lateral - rastreado ate' o modelo de
+	landmarks padrao (`2dfan4`) perdendo precisao nesse angulo, fazendo o recorte do rosto
+	tremer 1-2px entre frames e a borda da mascara entrar/sair da area da lente. O ensemble
+	`many` e' mais estavel. Combinado com mascara de oclusao (`box occlusion region`, em vez
+	do `box` sozinho) pra preservar oculos/mao/cabelo na frente do rosto de forma
+	consistente quadro a quadro. Testado ao vivo (contact sheet quadro a quadro) - lente
+	estavel em 100% dos frames testados, sem nenhuma alternancia."""
 	conda_python = os.path.expanduser(f"~/miniconda3/envs/{FACEFUSION_CONDA_ENV}/bin/python")
-	return [
+	cmd = [
 		conda_python, "facefusion.py", "headless-run",
 		"-s", source_path,
 		"-t", target_path,
 		"-o", output_path,
-		"--face-selector-mode", "reference",
-		"--reference-face-position", str(reference_face_position),
+	]
+	if face_selector_gender:
+		cmd += ["--face-selector-mode", "one", "--face-selector-gender", face_selector_gender]
+	else:
+		cmd += ["--face-selector-mode", "reference", "--reference-face-position", str(reference_face_position)]
+	cmd += [
+		"--face-landmarker-model", "many",
+		"--face-occluder-model", "many",
+		"--face-mask-types", "box", "occlusion", "region",
 		"--execution-providers", "cuda",
 	]
+	return cmd
 
 
 def build_background_remover_command(target_path: str, output_path: str) -> list[str]:

@@ -669,6 +669,83 @@ tabela de referência rápida abaixo (`Disco`) — removidos `Battle.net`/`World
 Warcraft` (123GB) e dados de usuário do Lutris (3GB) do mesmo NVMe compartilhado com o
 SO, liberando 126GB (de 105GB pra 230GB livres). Nada do `ap-ai-studio` foi tocado.
 
+**Achado real #20 — `--mode upscale` de vídeo OOM-killed com vídeo inteiro num lote só
+(2026-07-04, pego ao vivo, não em teste sintético):** o item 7 acima só tinha sido
+testado com vídeo curto (256×256→1024×1024). Um clipe real de 26s/625 frames (640×360,
+saída 4x = 2560×1440) foi morto pelo OOM killer aos ~10min de processamento, sem gerar
+nenhuma saída (`journalctl --user`: `vfx-comfyui-video.scope: Failed with result
+'oom-kill'`, memory peak exatamente nos 24G da jaula do Gate 1 pra modo `upscale`, que
+usa `MEMORY_MAX_DEFAULT` — não o teto maior de `MEMORY_MAX_VIDEO` do modo `video`).
+Causa raiz: `build_upscale_workflow` (Fase "Upscale standalone") carrega **todos** os
+frames do vídeo de uma vez via `VHS_LoadVideo` e aplica `ImageUpscaleWithModel` no lote
+inteiro — ao contrário do FaceFusion (streama frame a frame) ou do modo `faceswap`
+(`--chunk-seconds` já existia pra isso desde a Fase 7), o modo `upscale` não tinha
+nenhuma divisão em pedaços, então qualquer vídeo "grande o bastante" ia estourar mais
+cedo ou mais tarde, independente do teto da jaula.
+
+Achado colateral no mesmo teste: mesmo no caminho de vídeo curto (sem OOM), o modo
+`upscale` **nunca remontava o áudio original** — `build_upscale_workflow` só passa
+`"images"` pro `VHS_VideoCombine`, então todo vídeo upscalado saía mudo, silenciosamente
+(nenhum erro, só faltava o áudio no arquivo final).
+
+**Correção aplicada:** nova `process_long_upscale()` em `vfx_ffmpeg.py`, espelhando o
+`process_long_faceswap()` da Fase 7 — divide o vídeo em pedaços de `--chunk-seconds`
+(novo default de 8s especificamente pro modo `upscale`, se a flag não for passada, pra
+nunca mais repetir esse OOM por padrão), roda o upscale pedaço por pedaço, remonta com
+`concat_video_chunks()` e costura de volta o áudio/legendas do original via
+`build_ffmpeg_mastering_command()` (Fase 4) — tanto no caminho de pedaço único quanto no
+de vários pedaços. Modo imagem (`is_video_file()` == `False`) não muda — um frame só não
+tem risco de OOM por lote nem áudio a preservar. 2 testes novos em `test_run_vfx.py`
+(funcionais reais, ffmpeg de verdade, sem mock do ffmpeg): um confirma que o áudio
+aparece no arquivo final mesmo quando a "saída do ComfyUI" simulada não tem áudio
+nenhum (o sintoma exato que o usuário via antes), outro confirma que um vídeo de 6s com
+limite de 2s por pedaço dispara ≥3 chamadas ao ComfyUI (nunca o vídeo inteiro de uma
+vez) e remonta com duração próxima da original. Re-testado ao vivo com o mesmo clipe de
+26s que deu OOM antes da correção — ver resultado no final desta sessão.
+
+**Achado real #21 — scope do ComfyUI trava em "failed" depois de qualquer crash e
+bloqueia reinício (pego ao vivo tentando reproduzir a correção do #20 acima):** depois
+que o systemd mata o processo do ComfyUI dentro do `vfx-comfyui-video.scope` (OOM ou
+qualquer outro motivo), a unit transiente fica em estado `failed` e o systemd recusa
+criar uma nova com o MESMO nome (`systemd-run` falha com `"Unit vfx-comfyui-video.scope
+was already loaded or has a fragment file"`) — esse erro só aparecia no log interno do
+ComfyUI (`ai_pipeline/logs/comfyui_video_mode.log`), nunca no log do `run_vfx.py`, que só
+via um timeout genérico de 90s em `/system_stats` sem explicar a causa real. Diferente da
+jaula do FaceFusion (`run_in_memory_jail`, nome único por chamada via `uuid.uuid4()`), a
+do ComfyUI usa nome fixo de propósito (pra detectar/reaproveitar instância já rodando) -
+o preço é precisar limpar o estado "failed" antes de tentar de novo. Corrigido rodando
+`systemctl --user reset-failed` (inofensivo se a unit não existir ou não estiver
+failed) logo antes do `systemd-run`, em `ensure_comfyui_running_under_jail()`. Sem teste
+automatizado novo (essa função já era 100% mockada em todos os testes existentes, por
+mexer com systemd/GPU de verdade) - validado ao vivo re-rodando o mesmo cenário do #20.
+
+**Achado real #22 — correções de FaceFusion de uma cena com duas pessoas (Jurassic Park,
+2026-07-04) incorporadas em `build_facefusion_command` (antes só existiam como flags
+manuais numa sessão de terminal, nunca chegaram no código real):**
+- **Lente de óculos "piscando"**: rastreado até o modelo de landmarks padrão (`2dfan4`)
+  perdendo precisão em ângulo lateral, fazendo o recorte do rosto tremer 1-2px entre
+  frames e a borda da máscara entrar/sair da área da lente. Agora **por padrão**:
+  `--face-landmarker-model many` (ensemble, mais estável) + `--face-occluder-model many`
+  + `--face-mask-types box occlusion region` (em vez de só `box`) — preserva óculos/mão/
+  cabelo na frente do rosto de forma consistente. Testado ao vivo (contact sheet quadro a
+  quadro): lente estável em 100% dos frames.
+- **Contaminação de rosto em cena com duas pessoas**: o modo `reference` sozinho (posição
+  + distância) é frágil com mais de um rosto no quadro — a referência de um frame às
+  vezes não bate com o mesmo rosto em outros ângulos da cena (perde o swap), e quando a
+  distância é afrouxada pra compensar, o rosto ERRADO pode ser capturado por engano.
+  Novo parâmetro opcional `face_selector_gender` (`build_facefusion_command`) e flag
+  `--face-selector-gender` (`run_vfx.py`, modo `faceswap`) trocam pro modo `one` filtrado
+  por gênero quando informado — mais robusto pra cenas com mais de uma pessoa adulta,
+  **sem** tocar em nenhum filtro de idade/proteção do FaceFusion. **Importante pra não
+  relitigar o item 4 da Fase 3 (fronteira de segurança já decidida):** isso não é "usar
+  filtro de idade/gênero pra escolher o alvo" no sentido que aquela decisão proíbe — é só
+  desambiguar homem-vs-mulher **adultos já identificados** na mesma cena; sem
+  `--face-selector-gender`, o comportamento continua 100% inalterado (modo `reference` +
+  `--reference-face-position`, como sempre foi). Repassado também em
+  `process_long_faceswap()` (vídeo longo em pedaços). 3 testes novos em
+  `test_run_vfx.py` confirmando os defaults novos e que omitir o gênero preserva o
+  comportamento antigo.
+
 ---
 
 **Referência rápida (consolidada Fases 0-11, verificada ao vivo em 2026-07-03, pós-auditoria multi-perspectiva + `--mode upscale`):**
@@ -687,7 +764,7 @@ pra não precisar garimpar os achados de cada fase toda vez.
 *Modos do `run_vfx.py` (`--mode`, ver `build_parser()` em `run_vfx.py:386`):*
 | `--mode` | O que faz | Flags relevantes |
 |---|---|---|
-| `faceswap` | Troca de rosto (FaceFusion, modo referência); com `--chunk-seconds`, processa vídeo longo em pedaços | `--source --target --output [--chunk-seconds N]` |
+| `faceswap` | Troca de rosto (FaceFusion, modo referência; landmarker/oclusão estáveis por padrão desde o achado #22); com `--chunk-seconds`, processa vídeo longo em pedaços; `--face-selector-gender` desambigua cena com 2+ pessoas | `--source --target --output [--chunk-seconds N] [--face-selector-gender male\|female]` |
 | `video` | Geração T2V ou I2V (Wan2.2, GGUF Q4_K_M) — qualidade "rascunho", 720×720 no máximo | `--prompt [--source-image] [--width --height --num-frames]` |
 | `master` | Costura final CFR + bt709, remapeia áudio/legendas do original pro vídeo processado | `--original --processed-video --output [--fps]` |
 | `inpaint` | Edição de imagem com máscara manual (SDXL inpainting) | `--source-image --mask-image --output [--prompt]` (sem `--prompt`: aviso, não erro) |
@@ -695,7 +772,7 @@ pra não precisar garimpar os achados de cada fase toda vez.
 | `tts` | Síntese de fala / clonagem de voz (XTTS-v2) | `--text --output (--speaker \| --speaker-wav obrigatório) [--language]` |
 | `denoise` | Isola voz / separa de ruído-fundo (Demucs) | `--target --output [--output-instrumental]` |
 | `music` | Geração de música (MusicGen) | `--prompt --output [--music-duration]` |
-| `upscale` | Aumenta resolução 4x de foto/vídeo pronto (Real-ESRGAN, standalone) | `--target --output [--fps]` (fps só usado se `--target` for vídeo) |
+| `upscale` | Aumenta resolução 4x de foto/vídeo pronto (Real-ESRGAN, standalone); vídeo processado em pedaços (default 8s) e remontado com áudio original | `--target --output [--fps] [--chunk-seconds N]` (fps/chunk só usados se `--target` for vídeo) |
 
 *Modelos baixados (`/home/ap/ai_pipeline/models_hub/models/`, ~42.6GB total confirmado por `du -h` em 2026-07-02):*
 - `diffusion_models/`: Wan2.2 T2V-A14B e I2V-A14B, GGUF Q4_K_M, HighNoise+LowNoise cada (4 arquivos, ~9GB cada, ~36GB)
@@ -719,7 +796,7 @@ pra não precisar garimpar os achados de cada fase toda vez.
 *Testes (175 no total, todos passando, verificado ao vivo em 2026-07-03 pós mensagens de erro amigáveis estendidas):*
 | Suite | Testes | O que cobre |
 |---|---|---|
-| `test_run_vfx.py` | 77 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`). Roda contra os 7 módulos `vfx_*.py` via `run_vfx.py` (reexport). Inclui 6 testes do `--mode upscale`, 2 do `--blocks-to-swap`, 3 do ControlNet Depth no inpaint, 1 do feathering/composição da máscara e 3 confirmando que `inpaint`/`music`/`upscale` usam a jaula de memória do ComfyUI (não só o poll). |
+| `test_run_vfx.py` | 82 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`). Roda contra os 7 módulos `vfx_*.py` via `run_vfx.py` (reexport). Inclui 6 testes do `--mode upscale`, 2 do `--blocks-to-swap`, 3 do ControlNet Depth no inpaint, 1 do feathering/composição da máscara, 3 confirmando que `inpaint`/`music`/`upscale` usam a jaula de memória do ComfyUI (não só o poll), 2 do `process_long_upscale()` (chunking + remux de áudio, achado #20) e 3 do `face_selector_gender`/landmarker-oclusão padrão no `build_facefusion_command` (achado #22). |
 | `test_standalone_scripts.py` | 6 | `tts_synthesize.py`/`demucs_separate.py` via subprocesso real (validação de argumentos, sem precisar da GPU/modelos) |
 | `webui/backend/test_backend.py` | 44 | Contrato de API, jobs reais com `--dry-run` via subprocesso real, middleware de limite de upload/disco, limpeza automática, path traversal na SPA, validação de filename, limite de upload via streaming, validação de assinatura real do arquivo, job "fantasma" em upload multi-arquivo, rota `/jobs/upscale`, rota `/jobs/inpaint` com ControlNet |
 | `webui/frontend/src/**/*.test.tsx` | 48 | Vitest + React Testing Library — painel de log/status de job, validação de formulário, `BeforeAfterCompare.tsx` isolado (4 testes), estado "job concluído" nas 4 páginas com antes/depois (14 testes), `friendlyErrors.ts` (14 testes, 7 originais + 7 novos de FaceFusion/removebg/TTS/Demucs/FFmpeg/modelo ausente) + mensagem amigável no `JobLogPanel` (2 testes), `BatchJobQueue.tsx` isolado (4 testes, incluindo a nova API `renderResult`) + modo lote em `UpscalePage`/`RemoveBgPage`/`FaceSwapPage` (3 testes) + `DenoisePage.tsx` novo (3 testes, incluindo lote), checkbox de ControlNet no `InpaintPage` (1 teste) |
