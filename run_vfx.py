@@ -127,10 +127,12 @@ from vfx_facefusion import (  # noqa: F401
 # --- Reexport de vfx_ffmpeg.py ---
 from vfx_ffmpeg import (  # noqa: F401
 	build_ffmpeg_mastering_command,
+	build_lanczos_upscale_command,
 	concat_video_chunks,
 	get_video_duration_seconds,
 	process_long_faceswap,
 	process_long_upscale,
+	run_lanczos_upscale,
 	sanitize_exif,
 	split_video_into_chunks,
 )
@@ -333,19 +335,28 @@ async def orchestrate(args: argparse.Namespace, logger: logging.Logger) -> int:
 
 	if args.mode == "upscale":
 		# Pedido do usuario (auditoria de uso profissional): upscale de uma foto/video
-		# JA' EXISTENTE (ex.: foto antiga de familia), reaproveitando o mesmo modelo
-		# Real-ESRGAN ja instalado e usado internamente no modo `video` - nao gera
-		# nada novo, so' aumenta a resolucao 4x.
+		# JA' EXISTENTE (ex.: foto antiga de familia). Metodo padrao (2026-07-04): Lanczos +
+		# unsharp via ffmpeg (ver achado real em vfx_ffmpeg.py) - o RealESRGAN (unico modelo
+		# baixado) "alisa" demais rostos em fontes comprimidas, resultado descrito pelo
+		# usuario como "filtro de maquiagem" num teste as cegas comparando 6 tratamentos.
+		# --upscale-method realesrgan mantem o caminho antigo (ComfyUI/GPU) pra quem preferir.
 		if not args.target or not args.output:
 			logger.error("Modo upscale requer --target e --output")
 			return 1
 		if not os.path.isfile(args.target):
 			logger.error(f"--target nao encontrado: {args.target}")
 			return 1
+		is_video = is_video_file(args.target)
+
+		if args.upscale_method == "lanczos":
+			# ffmpeg streama frame a frame (sem risco de OOM por lote) e preserva o audio
+			# original sozinho - dispensa ComfyUI, GPU e --chunk-seconds pra este metodo.
+			returncode = await run_lanczos_upscale(args.target, args.output, is_video=is_video, logger=logger)
+			return returncode
+
 		await ensure_comfyui_running_under_jail(
 			memory_max=memory_cfg["memory_max"], memory_swap_max=memory_cfg["memory_swap_max"], logger=logger,
 		)
-		is_video = is_video_file(args.target)
 		if not is_video:
 			# Imagem unica: um so' frame, sem risco de OOM por lote nem audio a preservar.
 			staged = stage_image_for_comfyui(args.target)
@@ -461,7 +472,13 @@ def build_parser() -> argparse.ArgumentParser:
 	)
 	parser.add_argument("--original", type=str, default=None, help="Video original (audio/legendas), modo master")
 	parser.add_argument("--processed-video", type=str, default=None, help="Video processado (FaceFusion/Wan2.2), modo master")
-	parser.add_argument("--fps", type=float, default=24.0, help="Frame rate constante de saida (modo master; tambem usado no modo upscale se o alvo for video)")
+	parser.add_argument("--fps", type=float, default=24.0, help="Frame rate constante de saida (modo master; tambem usado no modo upscale se o alvo for video e --upscale-method=realesrgan - lanczos preserva o fps original sozinho, nao usa esta flag)")
+	parser.add_argument(
+		"--upscale-method", choices=["lanczos", "realesrgan"], default="lanczos",
+		help="Modo upscale: 'lanczos' (padrao, ffmpeg scale+unsharp - sem GPU, sem risco de OOM, "
+		"preserva audio original sozinho) ou 'realesrgan' (ComfyUI/GPU, tende a alisar rostos "
+		"demais em fontes comprimidas - ver achado real de 2026-07-04).",
+	)
 	return parser
 
 

@@ -26,6 +26,7 @@ from run_vfx import (
 	build_facefusion_command,
 	build_facefusion_env,
 	build_inpaint_workflow,
+	build_lanczos_upscale_command,
 	build_lip_syncer_command,
 	build_parser,
 	build_subprocess_env,
@@ -46,6 +47,7 @@ from run_vfx import (
 	orchestrate,
 	process_long_upscale,
 	run_in_memory_jail,
+	run_lanczos_upscale,
 	split_video_into_chunks,
 	stage_image_for_comfyui,
 	truncate_log_if_large,
@@ -433,6 +435,76 @@ def test_upscale_workflow_uses_the_same_realesrgan_model_as_video_mode():
 	assert wf["upscale_model"]["inputs"]["model_name"] == WAN22_UPSCALE_MODEL
 
 
+# --- Upscale via Lanczos+Unsharp (metodo padrao desde 2026-07-04, ver achado real) ---
+
+def test_lanczos_upscale_command_scales_4x_and_sharpens():
+	cmd = build_lanczos_upscale_command("/tmp/origem.mp4", "/tmp/saida.mp4", is_video=True)
+	filters = cmd[cmd.index("-vf") + 1]
+	assert "scale=iw*4:ih*4" in filters
+	assert "unsharp" in filters
+	assert cmd[cmd.index("-c:a") + 1] == "copy"
+
+
+def test_lanczos_upscale_command_image_has_no_audio_flags():
+	"""Achado real: imagem nao tem stream de audio - '-c:a copy' faria o ffmpeg falhar."""
+	cmd = build_lanczos_upscale_command("/tmp/foto.jpg", "/tmp/saida.jpg", is_video=False)
+	assert "-c:a" not in cmd
+	assert "-c:v" not in cmd
+
+
+def test_run_lanczos_upscale_video_scales_4x_and_keeps_audio_and_fps(tmp_path):
+	"""Teste funcional real (ffmpeg de verdade): confirma o motivo de trocar o metodo padrao
+	- diferente do caminho ComfyUI antigo (achado #20), o Lanczos preserva o audio original
+	sozinho (scale/unsharp nao tocam no stream de audio) e nao precisa de --fps nem chunking
+	pra isso, porque processa frame a frame (sem lote) e nao re-declara o frame rate."""
+	source = tmp_path / "origem_3s.mp4"
+	_make_test_video_with_audio(str(source), duration=3)
+
+	output = tmp_path / "saida_lanczos.mp4"
+	rc = asyncio.run(run_lanczos_upscale(str(source), str(output), is_video=True, logger=TEST_LOGGER))
+
+	assert rc == 0
+	assert output.is_file()
+	assert _has_audio_stream(str(output))
+
+	probe = subprocess.run(
+		["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+		 "-of", "csv=p=0", str(output)],
+		capture_output=True, text=True, check=True,
+	)
+	width, height = (int(v) for v in probe.stdout.strip().split(","))
+	assert (width, height) == (640, 640)  # testsrc e' 160x160 -> 4x = 640x640
+
+
+def test_upscale_mode_defaults_to_lanczos_without_starting_comfyui(monkeypatch, tmp_path):
+	"""Achado real (mudanca de metodo padrao): o metodo Lanczos nao usa ComfyUI/GPU - se
+	ensure_comfyui_running_under_jail for chamado no caminho padrao, e' sinal de regressao
+	(voltou a exigir o ComfyUI rodando sem necessidade, com todo o overhead/risco disso)."""
+	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
+
+	jail_calls = []
+
+	async def fake_ensure_comfyui_running_under_jail(*args, **kwargs):
+		jail_calls.append(kwargs)
+	monkeypatch.setattr("run_vfx.ensure_comfyui_running_under_jail", fake_ensure_comfyui_running_under_jail)
+
+	source = tmp_path / "origem_2s.mp4"
+	_make_test_video(str(source), duration=2)
+	output = tmp_path / "saida.mp4"
+
+	args = build_parser().parse_args([
+		"--mode", "upscale", "--auto-approve",
+		"--target", str(source), "--output", str(output),
+	])
+	assert args.upscale_method == "lanczos"
+
+	rc = asyncio.run(orchestrate(args, TEST_LOGGER))
+
+	assert rc == 0
+	assert output.is_file()
+	assert jail_calls == []
+
+
 def test_upscale_mode_requires_target_and_output(monkeypatch):
 	monkeypatch.setattr("vfx_gates.confirm", _fake_confirm_yes)
 	args = build_parser().parse_args(["--mode", "upscale", "--auto-approve"])
@@ -754,7 +826,7 @@ def test_upscale_mode_uses_comfyui_memory_jail_not_bare_poll(monkeypatch, tmp_pa
 	target = tmp_path / "foto.jpg"
 	target.write_bytes(b"fake-jpg-bytes")
 	args = build_parser().parse_args([
-		"--mode", "upscale", "--auto-approve",
+		"--mode", "upscale", "--auto-approve", "--upscale-method", "realesrgan",
 		"--target", str(target), "--output", str(tmp_path / "saida.jpg"),
 	])
 	logger = logging.getLogger("test-upscale-memory-jail")

@@ -193,7 +193,47 @@ async def process_long_faceswap(
 	return 0
 
 
-# --- Upscale de video longo em pedacos (achado real: OOM confirmado ao vivo) ---
+# --- Upscale via Lanczos+Unsharp (metodo padrao desde 2026-07-04) ---
+# Achado real (teste as cegas com o usuario, comparando 6 tratamentos no mesmo frame): o
+# RealESRGAN_x4plus (unico modelo baixado, ver achados abaixo) "alisa" demais pele/rosto em
+# fontes ja comprimidas - o usuario descreveu o resultado como "filtro de maquiagem" tipo
+# aplicativo de celular, sem ganho real de qualidade. Comparado lado a lado: Lanczos puro
+# (interpolacao, sem inventar nada) foi o preferido, mas ainda "borrado" por natureza; Lanczos
+# + unsharp (mascara de nitidez classica por cima) foi a escolha final - melhora nitidez
+# percebida sem alucinar textura falsa. Vantagens de engenharia sobre o caminho antigo
+# (ImageUpscaleWithModel/ComfyUI, ver bloco abaixo): ffmpeg processa frame a frame (streaming),
+# entao NAO tem o risco de OOM de carregar o video inteiro num lote so' - dispensa chunking,
+# dispensa ComfyUI/GPU, e preserva o audio original automaticamente (scale/unsharp nao tocam
+# em timestamps nem no stream de audio, ao contrario do VHS_VideoCombine que so' aceita
+# "images"). RealESRGAN continua disponivel via --upscale-method realesrgan pra quem preferir
+# o resultado "gerado por IA" em vez de nitidez classica.
+
+def build_lanczos_upscale_command(source_path: str, output_path: str, is_video: bool, scale_factor: int = 4) -> list[str]:
+	"""Comando ffmpeg puro (sem I/O) - escala `scale_factor`x com interpolacao Lanczos e aplica
+	uma mascara de nitidez (unsharp) por cima. Pra video, recodifica com libx264 (crf 18,
+	preset slow - qualidade alta, aceitavel pra um filtro que roda em segundos, nao minutos)
+	e copia o audio original sem re-codificar; pra imagem, so' o filtro espacial (sem opcoes
+	de audio, que nao existem numa imagem)."""
+	filters = f"scale=iw*{scale_factor}:ih*{scale_factor}:flags=lanczos,unsharp=5:5:1.2:5:5:0.0"
+	cmd = ["ffmpeg", "-y", "-i", source_path, "-vf", filters]
+	if is_video:
+		cmd += ["-c:v", "libx264", "-preset", "slow", "-crf", "18", "-c:a", "copy"]
+	cmd.append(output_path)
+	return cmd
+
+
+async def run_lanczos_upscale(source_path: str, output_path: str, is_video: bool, logger: logging.Logger) -> int:
+	cmd = build_lanczos_upscale_command(source_path, output_path, is_video=is_video)
+	proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+	_, stderr = await proc.communicate()
+	if proc.returncode != 0:
+		logger.error(f"Upscale Lanczos+Unsharp falhou: {stderr.decode(errors='ignore')}")
+	else:
+		logger.info(f"Upscale Lanczos+Unsharp concluido: {output_path}")
+	return proc.returncode
+
+
+# --- Upscale via RealESRGAN/ComfyUI em pedacos (achado real: OOM confirmado ao vivo) ---
 # O modo upscale (ImageUpscaleWithModel) carrega o video INTEIRO como um unico lote de
 # frames na VRAM/RAM antes de processar - ao contrario do FaceFusion, que streama frame a
 # frame. Um teste ao vivo com um clipe de 26s/625 frames em 640x360 (saida 4x = 2560x1440)

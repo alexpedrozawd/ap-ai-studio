@@ -746,6 +746,38 @@ manuais numa sessão de terminal, nunca chegaram no código real):**
   `test_run_vfx.py` confirmando os defaults novos e que omitir o gênero preserva o
   comportamento antigo.
 
+**Achado real #23 — RealESRGAN "maquia" rostos em fonte comprimida; Lanczos+Unsharp vira
+o método padrão do `--mode upscale` (2026-07-04, teste às cegas com o usuário):** depois
+da correção do OOM (achado #20), o usuário testou o resultado de verdade num vídeo real
+(640×360, fonte comprimida) e achou o resultado "insatisfatório" — descreveu como "filtro
+de maquiagem tipo Xiaomi", sem ganho real de nitidez, só rostos alisados de forma
+artificial. Causa: `RealESRGAN_x4plus` (único modelo baixado) é um modelo geral de
+restauração/GAN — em fontes já comprimidas (sem detalhe real pra recuperar), ele
+*hallucina* pele lisa plausível em vez de nitidez real, porque não há textura genuína
+pra reconstruir. Comparação lado a lado feita com o usuário (recorte de 3s, 6
+tratamentos no mesmo frame — ver artefato da sessão): Lanczos puro (interpolação, sem
+inventar nada) foi o preferido de longe, mas ainda "borrado" por natureza (a própria
+falta de detalhe da fonte, espalhada por mais pixels); Lanczos + Unsharp (máscara de
+nitidez clássica por cima) foi a escolha final do usuário — melhora nitidez percebida
+sem alucinar textura falsa.
+
+**Mudança:** novo método `build_lanczos_upscale_command()`/`run_lanczos_upscale()`
+(`vfx_ffmpeg.py`) — `scale=iw*4:ih*4:flags=lanczos,unsharp=5:5:1.2:5:5:0.0` via ffmpeg
+puro. Virou o **padrão** do `--mode upscale` (`--upscale-method lanczos`, default);
+`--upscale-method realesrgan` mantém o caminho antigo (ComfyUI/GPU, achados #7/#20/#21)
+pra quem preferir o resultado "gerado por IA". Vantagens de engenharia que vieram de
+graça com a troca (não eram o objetivo, mas resolvem achados anteriores pela raiz):
+ffmpeg processa frame a frame (streaming) — **sem** risco de OOM de carregar o vídeo
+inteiro num lote (dispensa chunking/`--chunk-seconds` pra este método) e **sem** perder
+o áudio original (scale/unsharp não tocam no stream de áudio nem em timestamps,
+ao contrário do `VHS_VideoCombine` que só aceita `"images"` — dispensa `--fps` também,
+já que não redeclara o frame rate). Não precisa mais do ComfyUI rodando pra este
+caminho. 4 testes novos em `test_run_vfx.py` (builder puro, funcional real com ffmpeg
+confirmando 4x + áudio preservado, e orquestração confirmando que o ComfyUI NÃO é
+iniciado no caminho padrão). O teste antigo do caminho ComfyUI
+(`test_upscale_mode_uses_comfyui_memory_jail_not_bare_poll`) passou a exigir
+`--upscale-method realesrgan` explicitamente.
+
 ---
 
 **Referência rápida (consolidada Fases 0-11, verificada ao vivo em 2026-07-03, pós-auditoria multi-perspectiva + `--mode upscale`):**
@@ -772,7 +804,7 @@ pra não precisar garimpar os achados de cada fase toda vez.
 | `tts` | Síntese de fala / clonagem de voz (XTTS-v2) | `--text --output (--speaker \| --speaker-wav obrigatório) [--language]` |
 | `denoise` | Isola voz / separa de ruído-fundo (Demucs) | `--target --output [--output-instrumental]` |
 | `music` | Geração de música (MusicGen) | `--prompt --output [--music-duration]` |
-| `upscale` | Aumenta resolução 4x de foto/vídeo pronto (Real-ESRGAN, standalone); vídeo processado em pedaços (default 8s) e remontado com áudio original | `--target --output [--fps] [--chunk-seconds N]` (fps/chunk só usados se `--target` for vídeo) |
+| `upscale` | Aumenta resolução 4x de foto/vídeo pronto; **padrão (achado #23): Lanczos+Unsharp via ffmpeg** (sem GPU, sem OOM, preserva áudio sozinho); `--upscale-method realesrgan` usa o caminho antigo (ComfyUI, tende a "alisar" rostos) processado em pedaços (default 8s) | `--target --output [--upscale-method lanczos\|realesrgan] [--fps] [--chunk-seconds N]` (fps/chunk só valem com `realesrgan` e vídeo) |
 
 *Modelos baixados (`/home/ap/ai_pipeline/models_hub/models/`, ~42.6GB total confirmado por `du -h` em 2026-07-02):*
 - `diffusion_models/`: Wan2.2 T2V-A14B e I2V-A14B, GGUF Q4_K_M, HighNoise+LowNoise cada (4 arquivos, ~9GB cada, ~36GB)
@@ -796,7 +828,7 @@ pra não precisar garimpar os achados de cada fase toda vez.
 *Testes (175 no total, todos passando, verificado ao vivo em 2026-07-03 pós mensagens de erro amigáveis estendidas):*
 | Suite | Testes | O que cobre |
 |---|---|---|
-| `test_run_vfx.py` | 82 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`). Roda contra os 7 módulos `vfx_*.py` via `run_vfx.py` (reexport). Inclui 6 testes do `--mode upscale`, 2 do `--blocks-to-swap`, 3 do ControlNet Depth no inpaint, 1 do feathering/composição da máscara, 3 confirmando que `inpaint`/`music`/`upscale` usam a jaula de memória do ComfyUI (não só o poll), 2 do `process_long_upscale()` (chunking + remux de áudio, achado #20) e 3 do `face_selector_gender`/landmarker-oclusão padrão no `build_facefusion_command` (achado #22). |
+| `test_run_vfx.py` | 86 | Gates, builders de comando/workflow, orquestração — mix de unitários e funcionais reais (ffmpeg de verdade cortando vídeo, OOM-kill real via `systemd-run`). Roda contra os 7 módulos `vfx_*.py` via `run_vfx.py` (reexport). Inclui 6 testes do `--mode upscale` (RealESRGAN), 2 do `--blocks-to-swap`, 3 do ControlNet Depth no inpaint, 1 do feathering/composição da máscara, 3 confirmando que `inpaint`/`music`/`upscale(realesrgan)` usam a jaula de memória do ComfyUI (não só o poll), 2 do `process_long_upscale()` (chunking + remux de áudio, achado #20), 3 do `face_selector_gender`/landmarker-oclusão padrão no `build_facefusion_command` (achado #22) e 4 do método Lanczos+Unsharp padrão do upscale, incluindo confirmar que o ComfyUI NÃO é iniciado nesse caminho (achado #23). |
 | `test_standalone_scripts.py` | 6 | `tts_synthesize.py`/`demucs_separate.py` via subprocesso real (validação de argumentos, sem precisar da GPU/modelos) |
 | `webui/backend/test_backend.py` | 44 | Contrato de API, jobs reais com `--dry-run` via subprocesso real, middleware de limite de upload/disco, limpeza automática, path traversal na SPA, validação de filename, limite de upload via streaming, validação de assinatura real do arquivo, job "fantasma" em upload multi-arquivo, rota `/jobs/upscale`, rota `/jobs/inpaint` com ControlNet |
 | `webui/frontend/src/**/*.test.tsx` | 48 | Vitest + React Testing Library — painel de log/status de job, validação de formulário, `BeforeAfterCompare.tsx` isolado (4 testes), estado "job concluído" nas 4 páginas com antes/depois (14 testes), `friendlyErrors.ts` (14 testes, 7 originais + 7 novos de FaceFusion/removebg/TTS/Demucs/FFmpeg/modelo ausente) + mensagem amigável no `JobLogPanel` (2 testes), `BatchJobQueue.tsx` isolado (4 testes, incluindo a nova API `renderResult`) + modo lote em `UpscalePage`/`RemoveBgPage`/`FaceSwapPage` (3 testes) + `DenoisePage.tsx` novo (3 testes, incluindo lote), checkbox de ControlNet no `InpaintPage` (1 teste) |
