@@ -7,7 +7,7 @@ from typing import Optional
 import aiohttp
 from fastapi import APIRouter
 
-from config import COMFYUI_DIR, COMFYUI_HOST, COMFYUI_PORT, VFX_PY
+from config import COMFYUI_DIR, COMFYUI_HOST, COMFYUI_PORT, VFX_DIR, VFX_PY
 from utils import truncate_log_if_large
 
 router = APIRouter()
@@ -57,7 +57,7 @@ async def get_status():
 async def start_comfyui():
 	if await comfyui_up():
 		return {"already_running": True}
-	log_path = "/home/ap/ai_pipeline/logs/comfyui_boot.log"
+	log_path = f"{VFX_DIR}/ai_pipeline/logs/comfyui_boot.log"
 	os.makedirs(os.path.dirname(log_path), exist_ok=True)
 	truncate_log_if_large(log_path)
 	with open(log_path, "ab") as log_file:

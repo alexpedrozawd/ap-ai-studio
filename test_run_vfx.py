@@ -539,7 +539,7 @@ def test_facefusion_env_sets_ld_library_path_for_cuda(monkeypatch, tmp_path):
 	nvidia_dir = fake_env_root / "nvidia"
 	(nvidia_dir / "cublas" / "lib").mkdir(parents=True)
 	(nvidia_dir / "cudnn" / "lib").mkdir(parents=True)
-	monkeypatch.setattr("vfx_facefusion.os.path.expanduser", lambda p: p.replace("~/miniconda3", str(tmp_path)))
+	monkeypatch.setattr("vfx_facefusion.MINICONDA_DIR", str(tmp_path))
 	env = build_facefusion_env()
 	assert "cublas/lib" in env["LD_LIBRARY_PATH"]
 	assert "cudnn/lib" in env["LD_LIBRARY_PATH"]

@@ -11,20 +11,20 @@
 # run_vfx.py - ex: vfx-rosto origem.jpg alvo.mp4 saida.mp4 --chunk-seconds 30
 
 VFX_DIR="/home/ap/ap-ai-studio"
-VFX_PY="/home/ap/miniconda3/envs/vfx-pipeline/bin/python"
+VFX_PY="$VFX_DIR/miniconda3/envs/vfx-pipeline/bin/python"
 VFX_SCRIPT="$VFX_DIR/run_vfx.py"
-FF_PY="/home/ap/miniconda3/envs/facefusion-pipeline/bin/python"
-FF_DIR="/home/ap/ai_pipeline/facefusion"
-COMFYUI_DIR="/home/ap/ai_pipeline/ComfyUI"
+FF_PY="$VFX_DIR/miniconda3/envs/facefusion-pipeline/bin/python"
+FF_DIR="$VFX_DIR/ai_pipeline/facefusion"
+COMFYUI_DIR="$VFX_DIR/ai_pipeline/ComfyUI"
 COMFYUI_HOST="127.0.0.1"
 COMFYUI_PORT="8288"
-WEBUI_PY="/home/ap/miniconda3/envs/webui-pipeline/bin/python"
+WEBUI_PY="$VFX_DIR/miniconda3/envs/webui-pipeline/bin/python"
 WEBUI_DIR="$VFX_DIR/webui"
 WEBUI_BACKEND_DIR="$WEBUI_DIR/backend"
 WEBUI_FRONTEND_DIR="$WEBUI_DIR/frontend"
 WEBUI_HOST="100.122.206.41"
 WEBUI_PORT="8299"
-COMFYUI_LOG="/home/ap/ai_pipeline/logs/comfyui_boot.log"
+COMFYUI_LOG="$VFX_DIR/ai_pipeline/logs/comfyui_boot.log"
 
 # --- internos, não chamar diretamente ---
 

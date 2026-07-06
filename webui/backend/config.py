@@ -8,19 +8,19 @@ Se um dia divergirem, e' sinal de que algo mudou dos dois lados e precisa de ate
 
 COMFYUI_HOST = "127.0.0.1"
 COMFYUI_PORT = 8288
-COMFYUI_DIR = "/home/ap/ai_pipeline/ComfyUI"
-
 VFX_DIR = "/home/ap/ap-ai-studio"
-VFX_PY = "/home/ap/miniconda3/envs/vfx-pipeline/bin/python"
+COMFYUI_DIR = f"{VFX_DIR}/ai_pipeline/ComfyUI"
+
+VFX_PY = f"{VFX_DIR}/miniconda3/envs/vfx-pipeline/bin/python"
 VFX_SCRIPT = f"{VFX_DIR}/run_vfx.py"
 
 # Dublagem (lip_syncer) nao tem --mode dedicado no run_vfx.py ainda (ver MANUAL_USO.md
 # secao 4.9) - chamamos o facefusion.py direto, no ambiente Conda proprio dele.
-FACEFUSION_PY = "/home/ap/miniconda3/envs/facefusion-pipeline/bin/python"
-FACEFUSION_DIR = "/home/ap/ai_pipeline/facefusion"
+FACEFUSION_PY = f"{VFX_DIR}/miniconda3/envs/facefusion-pipeline/bin/python"
+FACEFUSION_DIR = f"{VFX_DIR}/ai_pipeline/facefusion"
 
-UPLOAD_DIR = "/home/ap/ai_pipeline/webui_uploads"
-JOB_OUTPUT_DIR = "/home/ap/ai_pipeline/webui_jobs"
+UPLOAD_DIR = f"{VFX_DIR}/ai_pipeline/webui_uploads"
+JOB_OUTPUT_DIR = f"{VFX_DIR}/ai_pipeline/webui_jobs"
 
 # Achados de auditoria: (1) upload multipart era salvo em disco ANTES do Gate 3 do
 # run_vfx.py ter qualquer chance de checar espaco livre - um upload grande ja' teria

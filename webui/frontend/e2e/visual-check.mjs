@@ -23,7 +23,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEBUI_URL = process.env.WEBUI_URL ?? "http://100.122.206.41:8299";
 const CHROME_PATH = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const SCREENSHOTS_DIR = path.join(__dirname, "screenshots");
-const AI_PIPELINE_DIR = "/home/ap/ai_pipeline";
+const AI_PIPELINE_DIR = "/home/ap/ap-ai-studio/ai_pipeline";
 
 // Rotas que so' precisam renderizar certo no estado inicial (formulario vazio) - pega
 // regressao de layout/CSS sem precisar rodar um job de verdade em cada uma.
