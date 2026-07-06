@@ -7,3 +7,15 @@ __pycache__/
 # webui/frontend/.gitignore proprio, mas listado aqui tambem por seguranca.
 webui/backend/static/
 node_modules/
+
+# dados/instalacoes pesadas relocadas para dentro do projeto (ver simlinks em ~/ai_pipeline e ~/miniconda3)
+/ai_pipeline/
+/miniconda3/
+
+# midia de trabalho relocada pra dentro do projeto (ver simlinks em ~/cenas e ~/fotos) - nunca
+# versionar: cenas de filme protegidas por direitos autorais e fotos reais da familia, repo e publico
+/cenas/
+/fotos/
+
+# fila de jobs local (metadados de execucao, referencia caminhos pessoais) - estado runtime, nao codigo
+/.jobs/
