@@ -12,10 +12,43 @@ node_modules/
 /ai_pipeline/
 /miniconda3/
 
-# midia de trabalho relocada pra dentro do projeto (ver simlinks em ~/cenas e ~/fotos) - nunca
-# versionar: cenas de filme protegidas por direitos autorais e fotos reais da familia, repo e publico
+# midia de trabalho relocada pra dentro do projeto (antes eram simlinks em ~/cenas e ~/fotos, hoje
+# sao diretorios reais aqui dentro) - nunca versionar: cenas de filme protegidas por direitos autorais
+# e fotos reais da familia.
 /cenas/
 /fotos/
+/videos/
+/photos/
+/media/
+
+# saida gerada pelo pipeline (ComfyUI/FaceFusion) - imagens/videos com rosto de pessoas reais,
+# nunca deve ir pro repo mesmo que /ai_pipeline/ abaixo falhe em cobrir algum caminho novo
+/ai_pipeline/*/output/
+/ai_pipeline/*/outputs/
 
 # fila de jobs local (metadados de execucao, referencia caminhos pessoais) - estado runtime, nao codigo
 /.jobs/
+
+# rede de seguranca: nenhum arquivo de foto/video/audio deve ser versionado em lugar nenhum do repo,
+# mesmo fora dos diretorios acima (protege contra um arquivo solto esquecido em qualquer pasta nova).
+# .svg fica de fora da lista de propósito: são os ícones do frontend (webui/frontend), texto, não mídia.
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
+*.heic
+*.tiff
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.wav
+*.mp3
+*.flac
+*.psd
+*.raw
+*.cr2
+*.nef
