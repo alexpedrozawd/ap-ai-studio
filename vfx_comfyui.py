@@ -15,6 +15,7 @@ from vfx_config import (
 	COMFYUI_INPUT_DIR,
 	COMFYUI_PORT,
 	COMFYUI_SCOPE_UNIT,
+	MINICONDA_DIR,
 	PIPELINE_PATH,
 	PYTORCH_CUDA_ALLOC_CONF_VALUE,
 )
@@ -125,7 +126,7 @@ async def ensure_comfyui_running_under_jail(
 
 	env = build_subprocess_env()
 	env["PYTORCH_CUDA_ALLOC_CONF"] = PYTORCH_CUDA_ALLOC_CONF_VALUE
-	conda_python = os.path.expanduser(f"~/miniconda3/envs/{conda_env}/bin/python")
+	conda_python = os.path.join(MINICONDA_DIR, "envs", conda_env, "bin", "python")
 	log_path = os.path.join(PIPELINE_PATH, "logs", "comfyui_video_mode.log")
 	os.makedirs(os.path.dirname(log_path), exist_ok=True)
 	truncate_log_if_large(log_path)

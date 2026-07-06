@@ -175,6 +175,18 @@ de cada novo commit/push, conforme combinado.
   pela API depois da divisão.
 - `webui/backend/requirements.txt` regenerado (`pip freeze` real do `webui-pipeline`,
   44→60 pacotes) — refletia um estado anterior à instalação do `mypy`/`pre-commit`.
+- **Consolidação de diretórios (achado #24 do `PROMPT_MASTER.md`):** `cenas/` e
+  `fotos/` movidos de `/home/ap` para dentro do repositório; os símlinks de
+  compatibilidade (`~/ai_pipeline`, `~/miniconda3`, `~/cenas`, `~/fotos`) foram
+  removidos e todo caminho absoluto do código/config/docs passou a apontar direto
+  pra `/home/ap/ap-ai-studio/...`.
+
+### Segurança
+- **Repositório GitHub estava público** — trocado para privado. Nenhuma mídia
+  (cena de filme, foto) tinha vazado no histórico de commits até então, mas
+  `cenas/`/`fotos/` não estavam no `.gitignore` antes da consolidação acima, o que
+  seria um risco real de vazamento num commit futuro. Corrigido junto com a
+  consolidação: `.gitignore` agora ignora `/cenas/`, `/fotos/` e `/.jobs/`.
 
 ## [2026-07-03] — Auditoria de sistema, supervisão systemd, segurança
 

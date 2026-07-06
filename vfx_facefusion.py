@@ -11,6 +11,7 @@ from vfx_config import (
 	DEMUCS_CONDA_ENV,
 	DEMUCS_SCRIPT_PATH,
 	FACEFUSION_CONDA_ENV,
+	MINICONDA_DIR,
 	TTS_CONDA_ENV,
 	TTS_SCRIPT_PATH,
 )
@@ -51,7 +52,7 @@ def build_facefusion_command(
 	do `box` sozinho) pra preservar oculos/mao/cabelo na frente do rosto de forma
 	consistente quadro a quadro. Testado ao vivo (contact sheet quadro a quadro) - lente
 	estavel em 100% dos frames testados, sem nenhuma alternancia."""
-	conda_python = os.path.expanduser(f"~/miniconda3/envs/{FACEFUSION_CONDA_ENV}/bin/python")
+	conda_python = os.path.join(MINICONDA_DIR, "envs", FACEFUSION_CONDA_ENV, "bin", "python")
 	cmd = [
 		conda_python, "facefusion.py", "headless-run",
 		"-s", source_path,
@@ -72,7 +73,7 @@ def build_facefusion_command(
 
 
 def build_background_remover_command(target_path: str, output_path: str) -> list[str]:
-	conda_python = os.path.expanduser(f"~/miniconda3/envs/{FACEFUSION_CONDA_ENV}/bin/python")
+	conda_python = os.path.join(MINICONDA_DIR, "envs", FACEFUSION_CONDA_ENV, "bin", "python")
 	return [
 		conda_python, "facefusion.py", "headless-run",
 		"--processors", "background_remover",
@@ -109,7 +110,7 @@ def build_lip_syncer_command(
 	CPU valida ponta a ponta (~136s pra um clipe de 270 frames). 'cuda'/'tensorrt' continuam
 	disponiveis via parametro pra reavaliar no futuro sem mudanca de codigo, quando o
 	ecossistema atualizar."""
-	conda_python = os.path.expanduser(f"~/miniconda3/envs/{FACEFUSION_CONDA_ENV}/bin/python")
+	conda_python = os.path.join(MINICONDA_DIR, "envs", FACEFUSION_CONDA_ENV, "bin", "python")
 	return [
 		conda_python, "facefusion.py", "headless-run",
 		"--processors", "lip_syncer",
@@ -127,7 +128,7 @@ def build_facefusion_env() -> dict:
 	(que se auto-registra), onnxruntime plain precisa de LD_LIBRARY_PATH explicito. Sem isso,
 	falha silenciosamente pra CPU (bem mais lento, sem nenhum erro visivel no retorno)."""
 	env = build_subprocess_env()
-	site_packages = os.path.expanduser(f"~/miniconda3/envs/{FACEFUSION_CONDA_ENV}/lib/python3.11/site-packages")
+	site_packages = os.path.join(MINICONDA_DIR, "envs", FACEFUSION_CONDA_ENV, "lib", "python3.11", "site-packages")
 	nvidia_dir = os.path.join(site_packages, "nvidia")
 	if os.path.isdir(nvidia_dir):
 		lib_dirs = [
@@ -152,7 +153,7 @@ def build_tts_command(
 	minimo que o proprio coqui-tts declara) - incompativel com o transformers mais novo que o
 	WanVideoWrapper usa no mesmo processo do ComfyUI. Roda como script standalone, mesmo
 	padrao do FaceFusion."""
-	conda_python = os.path.expanduser(f"~/miniconda3/envs/{TTS_CONDA_ENV}/bin/python")
+	conda_python = os.path.join(MINICONDA_DIR, "envs", TTS_CONDA_ENV, "bin", "python")
 	cmd = [conda_python, TTS_SCRIPT_PATH, "--text", text, "--output", output_path, "--language", language]
 	if speaker:
 		cmd += ["--speaker", speaker]
@@ -172,7 +173,7 @@ def build_demucs_command(
 	pre-compilados dessa versao. Corrigido com torch 2.12.1+cu130 (mesma versao que ja
 	funciona no vfx-pipeline/ComfyUI). Tambem precisou de 'torchcodec' extra, que o torchaudio
 	dessa versao usa por padrao pra salvar audio (nao vem junto por padrao)."""
-	conda_python = os.path.expanduser(f"~/miniconda3/envs/{DEMUCS_CONDA_ENV}/bin/python")
+	conda_python = os.path.join(MINICONDA_DIR, "envs", DEMUCS_CONDA_ENV, "bin", "python")
 	cmd = [conda_python, DEMUCS_SCRIPT_PATH, "--input", input_path, "--output-vocals", output_vocals, "--model", model]
 	if output_instrumental:
 		cmd += ["--output-instrumental", output_instrumental]

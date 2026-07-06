@@ -778,6 +778,52 @@ iniciado no caminho padrão). O teste antigo do caminho ComfyUI
 (`test_upscale_mode_uses_comfyui_memory_jail_not_bare_poll`) passou a exigir
 `--upscale-method realesrgan` explicitamente.
 
+**Achado real #24 — consolidação de diretórios: tudo que é exclusivo do projeto passa a
+viver fisicamente dentro de `/home/ap/ap-ai-studio/` (2026-07-05, pedido do usuário):**
+até aqui, `ai_pipeline/` e `miniconda3/` já tinham sido fisicamente movidos pra dentro do
+repositório numa tentativa anterior do usuário, mas ficaram acessados via link simbólico
+em `~/ai_pipeline` e `~/miniconda3` (compatibilidade temporária). Nesta sessão: (1)
+`cenas/` (clipes de filme fonte, ~177MB) e `fotos/` (fotos reais da família) — os dois
+únicos diretórios de trabalho exclusivos do projeto que ainda estavam soltos em
+`/home/ap` — foram movidos pra dentro do repositório também; (2) **os 4 símlinks foram
+removidos** e todo caminho absoluto que passava por eles (`vfx_config.py:PIPELINE_PATH`,
+`vfx_aliases.sh`, `webui/backend/config.py`, `webui/backend/routes_status.py`,
+`webui/vfx-webui.service` + a cópia instalada em `~/.config/systemd/user/`, `~/.bashrc`
+— bloco do `conda init` e `TMPDIR`/`TEMP`, `extra_model_paths.yaml` do ComfyUI,
+`webui/frontend/e2e/visual-check.mjs`, `.claude/settings.local.json` e os exemplos do
+`MANUAL_USO.md`) passou a apontar direto pra `/home/ap/ap-ai-studio/...`, sem
+indireção. **Achado de segurança relevante encontrado no processo:** o repositório
+estava **público** no GitHub (`alexpedrozawd/ap-ai-studio`) — sem nenhuma mídia vazada
+no histórico até então (maior arquivo já commitado era um `package-lock.json` de
+216KB), mas com risco real de vazar cenas de filme protegidas por direitos autorais e
+fotos da família num commit futuro, já que `cenas/`/`fotos/` não estavam no
+`.gitignore`. Corrigido: `.gitignore` passou a ignorar `/cenas/`, `/fotos/` e `/.jobs/`
+(fila de jobs local, referencia caminhos pessoais), e o repositório foi trocado pra
+**privado** (autorizado explicitamente pelo usuário). **Nota:** as menções a
+`/home/ap/ai_pipeline` no texto original das Fases 0/1/3 acima descrevem a decisão de
+design tomada naquele momento (path ainda fora do repo) — mantidas como registro
+histórico, não foram reescritas; o valor real de `PIPELINE_PATH` hoje é
+`/home/ap/ap-ai-studio/ai_pipeline` (ver Referência rápida abaixo).
+
+**Achado real #24b — o grep inicial da consolidação perdeu o padrão `~/miniconda3` (só
+cobria `/home/ap/miniconda3` literal), quebrando FaceFusion/TTS/Demucs/ComfyUI de verdade
+depois de remover os símlinks (pego rodando a suíte de testes, não em teoria):**
+`vfx_comfyui.py` (conda_python do modo vídeo) e `vfx_facefusion.py` (FaceFusion, TTS,
+Demucs — 6 ocorrências) construíam o interpretador via
+`os.path.expanduser("~/miniconda3/envs/...")`, que resolvia certo só enquanto
+`~/miniconda3` existia como símlink. `CONDA_FALLBACK_PATHS` (`vfx_config.py`) e o hook
+`mypy-leve` do `.pre-commit-config.yaml` tinham o mesmo problema. **Confirmado ao vivo o
+que de fato quebra e o que não quebra:** o executável `python` de cada env (ELF real)
+continua rodando perfeitamente por caminho absoluto direto — inclusive
+`torch.cuda.is_available()` retornando `True` — o problema é específico de *scripts*
+com shebang fixo (`conda`, `pip`, entry-points instalados via pip), que passam a apontar
+pro caminho antigo inexistente. Corrigido substituindo todo `os.path.expanduser(f"~/miniconda3/...")`
+por `os.path.join(MINICONDA_DIR, ...)`, nova constante em `vfx_config.py`
+(`MINICONDA_DIR = "/home/ap/ap-ai-studio/miniconda3"`) — centraliza o valor numa
+constante só, em vez de repetir a string em cada arquivo (o que causou esse achado em
+primeiro lugar). Suíte de testes re-executada depois da correção, ver estado no final
+da sessão.
+
 ---
 
 **Referência rápida (consolidada Fases 0-11, verificada ao vivo em 2026-07-03, pós-auditoria multi-perspectiva + `--mode upscale`):**
@@ -806,7 +852,7 @@ pra não precisar garimpar os achados de cada fase toda vez.
 | `music` | Geração de música (MusicGen) | `--prompt --output [--music-duration]` |
 | `upscale` | Aumenta resolução 4x de foto/vídeo pronto; **padrão (achado #23): Lanczos+Unsharp via ffmpeg** (sem GPU, sem OOM, preserva áudio sozinho); `--upscale-method realesrgan` usa o caminho antigo (ComfyUI, tende a "alisar" rostos) processado em pedaços (default 8s) | `--target --output [--upscale-method lanczos\|realesrgan] [--fps] [--chunk-seconds N]` (fps/chunk só valem com `realesrgan` e vídeo) |
 
-*Modelos baixados (`/home/ap/ai_pipeline/models_hub/models/`, ~42.6GB total confirmado por `du -h` em 2026-07-02):*
+*Modelos baixados (`/home/ap/ap-ai-studio/ai_pipeline/models_hub/models/` — caminho atualizado no achado #24, ~42.6GB total confirmado por `du -h` em 2026-07-02):*
 - `diffusion_models/`: Wan2.2 T2V-A14B e I2V-A14B, GGUF Q4_K_M, HighNoise+LowNoise cada (4 arquivos, ~9GB cada, ~36GB)
 - `text_encoders/umt5-xxl-enc-fp8_e4m3fn.safetensors` (6.3GB, compartilhado T2V/I2V)
 - `vae/Wan2.1_VAE.safetensors` (243MB)

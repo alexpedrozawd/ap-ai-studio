@@ -35,7 +35,7 @@ repos:
         # num projeto que nunca teve checagem de tipo antes. Roda no webui-pipeline (unico
         # ambiente com mypy instalado, mesmo do bandit/ruff/pre-commit).
         entry: >-
-          bash -c '~/miniconda3/envs/webui-pipeline/bin/python -m mypy
+          bash -c '/home/ap/ap-ai-studio/miniconda3/envs/webui-pipeline/bin/python -m mypy
           --ignore-missing-imports --no-error-summary
           run_vfx.py vfx_config.py vfx_core.py vfx_gates.py vfx_comfyui.py
           vfx_workflows.py vfx_facefusion.py vfx_ffmpeg.py test_run_vfx.py

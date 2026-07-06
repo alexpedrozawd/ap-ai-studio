@@ -9,7 +9,8 @@ outros dependem dele, ele nao depende de nenhum outro.
 
 import os
 
-PIPELINE_PATH = "/home/ap/ai_pipeline"
+PIPELINE_PATH = "/home/ap/ap-ai-studio/ai_pipeline"
+MINICONDA_DIR = "/home/ap/ap-ai-studio/miniconda3"
 LOG_PATH = os.path.join(PIPELINE_PATH, "logs", "run_vfx.log")
 COMFYUI_HOST = "127.0.0.1"
 COMFYUI_PORT = 8288
@@ -24,8 +25,8 @@ NVIDIA_SMI_PATH = "/usr/bin/nvidia-smi"  # achado do SAST (bandit B607): caminho
 LOG_TRUNCATE_THRESHOLD_BYTES = 5 * 1024 * 1024
 
 CONDA_FALLBACK_PATHS = [
-	os.path.expanduser("~/miniconda3/bin/conda"),
-	os.path.expanduser("~/miniconda3/condabin/conda"),
+	os.path.join(MINICONDA_DIR, "bin", "conda"),
+	os.path.join(MINICONDA_DIR, "condabin", "conda"),
 ]
 
 # Fase 3B: modelo de vídeo generativo (Wan2.2 T2V-A14B, GGUF Q4_K_M, MoE high/low noise)
