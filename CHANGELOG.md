@@ -5,11 +5,59 @@ Este arquivo registra **o quê e quando** de forma escaneável — a razão de c
 (os "achados reais", causa raiz, decisões de arquitetura) continua documentada em
 detalhe no [`PROMPT_MASTER.md`](PROMPT_MASTER.md), que este changelog não substitui.
 
+## [2026-07-26] — Migração Ubuntu/NVIDIA → Bazzite/AMD
+
+Reconstrução do projeto para o servidor atual: **Bazzite 44 (Fedora Kinoite,
+imutável/ostree)** e **Radeon RX 9070 XT (RDNA4/gfx1201)**, saindo de Ubuntu 24.04 com
+RTX 5060 Ti. Análise de impacto, decisões e pendências em
+[`MIGRACAO_BAZZITE.md`](MIGRACAO_BAZZITE.md).
+
+### Corrigido
+
+- **Gate 3 abortava todo o pipeline no Bazzite.** `get_disk_free_gb("/")` media a raiz,
+  que no ostree é composefs somente-leitura (~44 MB, 100% ocupada por definição) —
+  resultado: "espaço insuficiente" com 211 GB livres, e o Gate 3 é o único não pulável
+  nem com `--auto-approve`. Eram **4 ocorrências** (`vfx_gates`, `vfx_ffmpeg` ×2,
+  `webui/backend/main`), mais a aba Status da webui (`routes_status`), que mostrava
+  0 GB livres. Agora tudo mede `DISK_CHECK_PATH` (padrão `AP_AI_STUDIO_HOME`).
+  A suíte de testes reproduziu o bug ao vivo antes da correção.
+- **Caminhos do servidor antigo** (`/home/ap/...`, usuário `ap`) espalhados por código,
+  atalhos, serviço systemd e documentação — parametrizados via `AP_AI_STUDIO_HOME`.
+
+### Alterado
+
+- **Leitura de VRAM:** `nvidia-smi` → sysfs do `amdgpu`
+  (`/sys/class/drm/card*/device/mem_info_vram_*`). Sem binário externo e sem pacote a
+  instalar — `rocm-smi` exigiria layering na imagem imutável.
+- **Alocador do PyTorch:** `PYTORCH_CUDA_ALLOC_CONF` → `PYTORCH_HIP_ALLOC_CONF`.
+- **Encoder de vídeo:** `h264_nvenc` → `h264_vaapi`, com `-vaapi_device` e
+  `format=nv12,hwupload` (não é troca de nome). VAAPI validado nesta GPU antes de adotar.
+  A AMD descontinuou o AMF nos drivers Linux e orienta VA-API. `libx264` segue
+  disponível por parâmetro para quando a qualidade importar mais que o tempo.
+- **FaceFusion:** execution provider virou configurável
+  (`AP_AI_STUDIO_EXECUTION_PROVIDER`), com padrão `cpu` — não há wheel oficial de
+  `onnxruntime-rocm` com kernels gfx1201. Sem regressão para o `lip_syncer`, que já
+  rodava em CPU na RTX pelo mesmo tipo de motivo.
+- **Ambiente de execução:** passa a viver num contêiner **distrobox** com acesso a
+  `/dev/dri` e `/dev/kfd`, em vez de instalado no sistema. Motivo: a raiz é imutável e o
+  ROCm não pode contaminar a GPU que serve o desktop KDE e o Steam.
+- **Conda:** apenas o canal `conda-forge`. Os canais padrão da Anaconda passaram a exigir
+  aceite de Termos de Serviço e restringem uso comercial.
+
+### Segurança
+
+- **IP Tailscale do servidor antigo estava hardcoded** em `webui/vfx-webui.service` e no
+  `README.md`, num repositório **público**. Removido: o endereço agora vem de
+  `EnvironmentFile` fora do git (`webui/vfx-webui.env.example` documenta o formato), e a
+  unidade declara dependência de `tailscaled.service` — antes, um bind no IP da tailnet
+  antes do Tailscale subir derrubava a interface sem explicação.
+
+---
+
 ## [Não lançado]
 
-Trabalho feito nesta sessão. Parte já commitada e enviada (`0ccf2b0`, `e4aa067`,
-`7db6b99` em `origin/main`); o restante segue aguardando confirmação do usuário antes
-de cada novo commit/push, conforme combinado.
+Trabalho da sessão anterior. Parte já commitada e enviada (`0ccf2b0`, `e4aa067`,
+`7db6b99` em `origin/main`).
 
 ### Corrigido
 - **`MANUAL_USO.md` desatualizado em 6 pontos** (todos causados pela correção da jaula

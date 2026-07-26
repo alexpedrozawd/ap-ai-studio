@@ -1,3 +1,8 @@
+> **Documento histórico.** Esta auditoria foi feita em 2026-07-03, quando o projeto
+> rodava em Ubuntu 24.04 com NVIDIA RTX 5060 Ti. O conteúdo foi preservado como está —
+> reescrever um registro datado para parecer atual seria falsificá-lo. Para o ambiente
+> vigente (Bazzite + Radeon RX 9070 XT), ver [`MIGRACAO_BAZZITE.md`](MIGRACAO_BAZZITE.md).
+
 # Auditoria Multi-Perspectiva — AP AI Studio (2ª revisão, confirmação)
 
 **Data:** 2026-07-03 · **Auditor:** Claude (Sonnet 5)

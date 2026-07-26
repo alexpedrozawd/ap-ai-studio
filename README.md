@@ -27,8 +27,9 @@ Existem duas formas de usar o pipeline — escolha a que preferir, elas fazem ex
    ```
    Na primeira vez ela builda o frontend sozinha (demora um pouco); nas próximas, sobe
    direto.
-2. Abra no navegador: **`http://100.122.206.41:8299`** (funciona no navegador do
-   próprio servidor ou de qualquer aparelho na sua rede Tailscale).
+2. Abra no navegador: **`http://<ip-tailscale-do-servidor>:8299`** (funciona no navegador
+   do próprio servidor ou de qualquer aparelho na sua rede Tailscale). Descubra o IP com
+   `tailscale ip -4`; ele fica no seu `~/.config/ap-ai-studio/webui.env`, fora do git.
 3. Navegue pelo menu no topo:
    - **Status** — vê se o ComfyUI está ligado, VRAM e disco livres.
    - **Gerar Vídeo** — texto→vídeo ou imagem→vídeo.
@@ -88,7 +89,7 @@ vivo. Ver [seção 3 do MANUAL_USO.md](MANUAL_USO.md) para o detalhe de cada Gat
 - `run_vfx.py`: orquestrador principal (`orchestrate()`/`build_parser()`/`main()`) — 466 linhas, dividido em módulos por responsabilidade: `vfx_config.py` (constantes), `vfx_core.py` (validação/logging/confirm), `vfx_gates.py` (os 3 Gates de segurança), `vfx_comfyui.py` (comunicação com o ComfyUI), `vfx_workflows.py` (construtores de workflow, incluindo `--mode upscale`), `vfx_facefusion.py` (comandos externos), `vfx_ffmpeg.py` (FFmpeg/EXIF/chunking). `test_run_vfx.py` testa tudo isso via `run_vfx.py` (77 testes). `--mode upscale` amplia 4x uma foto/vídeo pronto (Real-ESRGAN, standalone, sem gerar nada novo) — ver seção 4.13 do `MANUAL_USO.md`. ControlNet Depth opcional no `--mode inpaint` (`--use-depth-controlnet`) e `--blocks-to-swap` avançado no `--mode video`.
 - `tts_synthesize.py` / `demucs_separate.py`: scripts standalone chamados pelo `run_vfx.py` (modos `tts` e `denoise`), cada um no seu próprio ambiente Conda. `test_standalone_scripts.py` testa os dois via subprocesso real (6 testes).
 - `webui/`: interface web (FastAPI + React/TypeScript/Tailwind/Bootstrap), acessível via
-  Tailscale em `http://100.122.206.41:8299` — **rodando agora, supervisionada pelo
+  Tailscale na porta `8299` — supervisionada pelo
   `systemd --user`** (`vfx-web-enable`, ativado em 2026-07-03; `vfx-web-status` mostra o
   estado). Todas as 11 funções do `run_vfx.py` (Fases A+B + upscale) — ver seção 11 do `MANUAL_USO.md`.
   `webui/backend/` (env Conda `webui-pipeline`, 44 testes em `test_backend.py`) chama
@@ -119,28 +120,46 @@ técnico completo (payloads usados, causa raiz, correção) no `PROMPT_MASTER.md
 
 ## ⚠️ Troubleshooting (Problemas Possíveis e Soluções)
 
-Durante a execução da arquitetura gerada pelo script, você pode encontrar alguns problemas decorrentes da complexidade de lidar com Hardware, I/O e Kernel simultaneamente no Ubuntu. Aqui está o guia de sobrevivência:
+Guia de sobrevivência para os problemas que aparecem ao lidar com hardware, I/O e kernel ao mesmo tempo. Atualizado para **Bazzite (Fedora Kinoite, imutável/ostree)** e **AMD Radeon RX 9070 XT**.
 
-### 1. Erro de Permissão do `systemd-run` via SSH (Gate 1 Falha)
-**Problema:** Ao rodar via SSH de outro computador, o Ubuntu pode negar a criação do escopo de memória do `systemd-run` retornando um erro de "Failed to connect to bus".
-**Solução:** O script Python do AP AI Studio possui um Fallback automático para usar a biblioteca `resource`. Mas caso queira consertar isso permanentemente no servidor, habilite o "linger" para o seu usuário rodando: `loginctl enable-linger ap`. E certifique-se de que a variável de ambiente do DBus está ativa no terminal remoto executando `export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"`.
+### 1. `systemd-run` falha via SSH (Gate 1)
+**Problema:** Ao rodar via SSH, o `systemd-run --user` retorna "Failed to connect to bus".
+**Solução:** O `run_vfx.py` já cai automaticamente para o plano B (`resource.setrlimit`), então o pipeline não para. Para resolver de vez, o *linger* precisa estar ativo (`loginctl enable-linger apsrv` — **já está ativo nesta máquina**) e o DBus da sessão precisa estar visível no terminal remoto: `export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"`.
 
-### 2. FFmpeg Gerando "Audio Drift" (Sincronia labial atrasada)
-**Problema:** O vídeo final aparece com o áudio alguns milissegundos ou segundos atrasado em relação à imagem.
-**Solução:** Isso ocorre se o vídeo original possui uma Taxa de Quadros Variável (VFR) originada de um celular, e o script de IA tentou processar como se fosse fixo. A automação deve ter um "Passo Zero" forçado. Você também pode rodar o FFmpeg manualmente para travar os quadros antes de jogar na IA:
+### 2. FFmpeg gerando "audio drift" (sincronia labial atrasada)
+**Problema:** O vídeo final sai com o áudio adiantado ou atrasado em relação à imagem.
+**Solução:** Acontece quando o original tem taxa de quadros variável (VFR), típico de celular, e foi processado como se fosse fixa. Trave os quadros antes:
 `ffmpeg -i original.mp4 -r 24 -c:v libx264 -c:a copy cfr_original.mp4`
 
-### 3. VRAM Estourando Repentinamente (Crash no Gate 2)
-**Problema:** O script alerta no Gate 2 que a VRAM tem menos de 15.5GB livres. O ComfyUI recusa a renderização.
-**Solução:** O seu Qwen 2.5 (Ollama/LM Studio) ou a Steam estão monopolizando a Placa de Vídeo em segundo plano. Rode o comando `nvidia-smi` no terminal para descobrir o PID (ID do Processo) que está usando a VRAM. Encerre o jogo ou descarregue temporariamente o modelo do Qwen da memória até a renderização do vídeo acabar.
+### 3. VRAM estourando (alerta no Gate 2)
+**Problema:** O Gate 2 avisa que há menos de 15 GB de VRAM livres e o ComfyUI recusa renderizar.
+**Solução:** Nesta máquina a GPU é compartilhada com o desktop KDE e o Steam — um jogo aberto, ou vários navegadores com aceleração, consomem VRAM em segundo plano. Para ver o consumo:
+```bash
+vfx-status                                          # já mostra VRAM e disco
+cat /sys/class/drm/card*/device/mem_info_vram_used   # leitura crua, em bytes
+```
+Feche o jogo antes de renderizar. (Se o Ollama estiver instalado, o Gate 2 também oferece descarregar o modelo automaticamente; sem ele, essa etapa é ignorada em silêncio.)
 
-### 4. Lentidão Extrema e Placa de Vídeo Ociosa (SATA Bottleneck)
-**Problema:** O render do vídeo está sendo executado de forma absurdamente lenta, com processamento na GPU baixo.
-**Solução:** O disco SATA não está conseguindo acompanhar o ritmo da gravação dos frames. Verifique se o script Python gerado pela IA realmente incluiu o formato de gravação compactado *lossless* (como `-c:v ffv1` no FFmpeg) ao invés de usar imagens PNG descompactadas pesadas. Se o FFmpeg estiver gerando PNGs crus, ele engasgará a velocidade (banda) do disco SATA.
+### 4. Render lento com a GPU ociosa (gargalo de disco)
+**Problema:** O render arrasta e a GPU fica com uso baixo.
+**Solução:** O disco não acompanha a gravação dos frames. Confirme que a gravação intermediária usa formato compactado *lossless* (`-c:v ffv1`) em vez de PNGs crus, que saturam a banda do disco.
 
-### 5. Wayland Crash no Ubuntu 24.04 (Falta de Monitor)
-**Problema:** O terminal acusa um erro de "Could not load the Qt platform plugin wayland". O script aborta.
-**Solução:** Bibliotecas de processamento visual como o OpenCV tentaram invocar um renderizador de janelas e não encontraram uma tela gráfica disponível (comum em sessões remotas/SSH ou scripts sem janela). Confirme se a variável `export QT_QPA_PLATFORM=offscreen` está ativada (ou injetada no script) para forçar as bibliotecas a rodarem de modo "Headless" (Invisível).
+### 5. Erro de plugin Qt/Wayland (sem monitor)
+**Problema:** "Could not load the Qt platform plugin wayland" e o script aborta.
+**Solução:** Bibliotecas como o OpenCV tentam abrir uma janela e não encontram tela — comum em sessão SSH. Force o modo headless: `export QT_QPA_PLATFORM=offscreen`.
+
+### 6. FFmpeg falha com "Function not implemented" no encoder
+**Problema:** A masterização quebra ao usar `h264_vaapi`.
+**Solução:** VAAPI exige inicializar o dispositivo e subir os frames para a GPU — não basta trocar o nome do codec. O `build_ffmpeg_mastering_command` já monta isso (`-vaapi_device` + `format=nv12,hwupload`). Se persistir, confirme que o dispositivo existe e que o encoder está disponível:
+```bash
+ls -la /dev/dri/renderD128
+vainfo | grep -i encslice
+```
+Alternativa: passar `video_codec="libx264"` desliga o caminho de hardware e volta para CPU — mais lento, qualidade melhor a mesmo bitrate.
+
+### 7. Pipeline aborta com "espaço insuficiente" tendo disco sobrando
+**Problema:** O Gate 3 recusa executar alegando disco cheio, mas `df -h` mostra centenas de GB livres.
+**Solução:** Sintoma clássico de medir o caminho errado no ostree. A raiz `/` é **composefs somente-leitura** (~44 MB, 100% ocupada por definição) — medir ali sempre devolve zero. O código mede `DISK_CHECK_PATH` (padrão: `AP_AI_STUDIO_HOME`). Se você sobrescreveu essa variável, aponte-a para um diretório dentro de `/var/home`.
 
 ### 6. Interface web recusa o upload (HTTP 413 ou 507)
 **Problema:** Ao enviar um arquivo pela interface web, a resposta vem com erro em vez de criar o job.
