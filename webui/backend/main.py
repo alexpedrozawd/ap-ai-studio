@@ -70,7 +70,8 @@ async def enforce_upload_limits(request: Request, call_next):
 			return JSONResponse(
 				{"detail": f"Upload maior que o limite de {limit_gb:.0f}GB."}, status_code=413,
 			)
-		free_gb = shutil.disk_usage("/").free / (1024**3)
+		# Nao medir "/": composefs somente-leitura no Bazzite (ver routes_status.py).
+		free_gb = shutil.disk_usage(VFX_DIR).free / (1024**3)
 		if free_gb < DISK_SAFETY_MARGIN_GB:
 			return JSONResponse(
 				{

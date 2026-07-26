@@ -17,7 +17,7 @@ from vfx_config import (
 	COMFYUI_SCOPE_UNIT,
 	MINICONDA_DIR,
 	PIPELINE_PATH,
-	PYTORCH_CUDA_ALLOC_CONF_VALUE,
+	PYTORCH_HIP_ALLOC_CONF_VALUE,
 )
 from vfx_core import build_subprocess_env, check_binary, check_port_free, truncate_log_if_large
 
@@ -49,7 +49,7 @@ async def poll_comfyui_system_stats(
 
 async def free_comfyui_vram(host: str = COMFYUI_HOST, port: int = COMFYUI_PORT, logger: Optional[logging.Logger] = None) -> None:
 	"""Achado real (chunked faceswap falhou com 'Failed to allocate memory for requested
-	buffer of size 294912' - so 288KB, mesmo com 8GB 'livres' segundo nvidia-smi): o ComfyUI
+	buffer of size 294912' - so 288KB, mesmo com 8GB 'livres' segundo o amdgpu): o ComfyUI
 	mantem modelos em cache na VRAM entre execucoes (ex.: o checkpoint SDXL de 7GB do
 	inpainting ficou carregado ate um teste de FaceFusion completamente sem relacao precisar
 	de memoria). Chamar /free antes de qualquer operacao pesada do FaceFusion evita essa
@@ -75,7 +75,7 @@ async def ensure_comfyui_running_under_jail(
 	comfyui_dir: str = COMFYUI_DIR, conda_env: str = "vfx-pipeline",
 ) -> None:
 	"""Garante que o ComfyUI esteja rodando dentro de um systemd scope com o limite de
-	memoria do Gate 1 e com PYTORCH_CUDA_ALLOC_CONF setado. Achado da revisao: sem isso,
+	memoria do Gate 1 e com PYTORCH_HIP_ALLOC_CONF setado. Achado da revisao: sem isso,
 	o modo video calculava o limite mas nunca o aplicava - o ComfyUI ficava rodando solto
 	na propria sessao de login (sem MemoryMax/MemorySwapMax nenhum), exatamente o cenario
 	de thrashing que o Gate 1 existe para evitar. Se ja estiver rodando dentro do scope
@@ -125,7 +125,7 @@ async def ensure_comfyui_running_under_jail(
 			)
 
 	env = build_subprocess_env()
-	env["PYTORCH_CUDA_ALLOC_CONF"] = PYTORCH_CUDA_ALLOC_CONF_VALUE
+	env["PYTORCH_HIP_ALLOC_CONF"] = PYTORCH_HIP_ALLOC_CONF_VALUE
 	conda_python = os.path.join(MINICONDA_DIR, "envs", conda_env, "bin", "python")
 	log_path = os.path.join(PIPELINE_PATH, "logs", "comfyui_video_mode.log")
 	os.makedirs(os.path.dirname(log_path), exist_ok=True)

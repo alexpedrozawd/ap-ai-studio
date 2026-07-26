@@ -8,6 +8,7 @@ import os
 from typing import Optional
 
 from vfx_config import (
+	DEFAULT_EXECUTION_PROVIDER,
 	DEMUCS_CONDA_ENV,
 	DEMUCS_SCRIPT_PATH,
 	FACEFUSION_CONDA_ENV,
@@ -67,7 +68,7 @@ def build_facefusion_command(
 		"--face-landmarker-model", "many",
 		"--face-occluder-model", "many",
 		"--face-mask-types", "box", "occlusion", "region",
-		"--execution-providers", "cuda",
+		"--execution-providers", DEFAULT_EXECUTION_PROVIDER,
 	]
 	return cmd
 
@@ -79,37 +80,28 @@ def build_background_remover_command(target_path: str, output_path: str) -> list
 		"--processors", "background_remover",
 		"-t", target_path,
 		"-o", output_path,
-		"--execution-providers", "cuda",
+		"--execution-providers", DEFAULT_EXECUTION_PROVIDER,
 	]
 
 
 def build_lip_syncer_command(
 	source_audio_path: str, target_video_path: str, output_path: str, execution_providers: str = "cpu",
 ) -> list[str]:
-	"""DECISAO OFICIAL (nao e mais um TODO): CPU e o modo definitivo do lip_syncer neste
-	servidor, ate o ecossistema onnxruntime/TensorRT amadurecer suporte pra essa GPU.
+	"""CPU e o modo definitivo do lip_syncer neste servidor (decisao mantida na migracao
+	pra AMD em 2026-07-26), ate o onnxruntime publicar wheel com kernels pra esta GPU.
 
-	Causa raiz confirmada: a RTX 5060 Ti e arquitetura Blackwell, compute capability sm_120.
-	O onnxruntime-gpu oficial (testado 1.26.0 e 1.27.0) nao traz kernels cuBLAS compilados pra
-	essa arquitetura ainda (confirmado em issues abertas no repo oficial microsoft/onnxruntime,
-	ex. #26245/#26177) - o wav2lip usa uma operacao de cuBLAS sem caminho de fallback JIT e
-	falha com 'CUBLAS failure 3: the resource allocation failed'.
+	Situacao atual (RX 9070 XT, RDNA4/gfx1201): nao ha wheel oficial de onnxruntime-rocm com
+	kernels gfx1201 prontos. Construir da fonte exige CMAKE_HIP_ARCHITECTURES e ha relatos de
+	gfx1201 ausente da tabela de arquiteturas, causando fallback silencioso. Avaliado e
+	descartado por ora: esforco alto, resultado incerto, e o ganho so' apareceria aqui.
 
-	Alternativas avaliadas e descartadas (nao sao 'sim, mas' - trocam um problema contornavel
-	por um risco maior ou esforco desproporcional):
-	  - Atualizar onnxruntime-gpu -> exige libcudart.so.13, pacotes pip pra CUDA 13 falham ao
-	    compilar wheel neste ambiente.
-	  - Forcar --execution-providers tensorrt -> SDK completo nao instalado, cai pra CPU do
-	    mesmo jeito (e nao ha garantia de suporte a sm_120 nem instalando).
-	  - Build nao-oficial com kernels sm_120 (Natfii/onnxruntime-gpu-blackwell) -> 0 estrelas,
-	    sem manutencao, risco de seguranca real pra rodar binario pre-compilado nao verificado.
-	  - Reimplementar wav2lip em PyTorch (que ja funciona bem nessa GPU, confirmado no
-	    WanVideoWrapper/TTS/Demucs) -> exigiria patchear o codigo-fonte do FaceFusion, fragil
-	    contra atualizacoes deles, desproporcional pro ganho.
+	Historico (RTX 5060 Ti, Blackwell/sm_120): o mesmo processador ja rodava em CPU pelo mesmo
+	tipo de motivo - o onnxruntime-gpu nao trazia kernels cuBLAS pra sm_120 e o wav2lip falhava
+	com 'CUBLAS failure 3'. Registrado porque mostra o padrao: arquitetura nova demais pro
+	ecossistema onnxruntime e' um problema recorrente, independente de fabricante.
 
-	CPU valida ponta a ponta (~136s pra um clipe de 270 frames). 'cuda'/'tensorrt' continuam
-	disponiveis via parametro pra reavaliar no futuro sem mudanca de codigo, quando o
-	ecossistema atualizar."""
+	CPU validada ponta a ponta na epoca (~136s pra um clipe de 270 frames). O parametro
+	`execution_providers` segue exposto pra reavaliar sem mudanca de codigo."""
 	conda_python = os.path.join(MINICONDA_DIR, "envs", FACEFUSION_CONDA_ENV, "bin", "python")
 	return [
 		conda_python, "facefusion.py", "headless-run",
@@ -122,20 +114,35 @@ def build_lip_syncer_command(
 
 
 def build_facefusion_env() -> dict:
-	"""Achado real: o onnxruntime-gpu do ambiente facefusion-pipeline nao acha as bibliotecas
-	CUDA 12.x mesmo com nvidia-cublas-cu12/nvidia-cudnn-cu12 instaladas via pip - elas ficam
-	dentro do site-packages, fora do caminho de busca do linker dinamico. Diferente do torch
-	(que se auto-registra), onnxruntime plain precisa de LD_LIBRARY_PATH explicito. Sem isso,
-	falha silenciosamente pra CPU (bem mais lento, sem nenhum erro visivel no retorno)."""
+	"""Monta o ambiente do subprocesso do FaceFusion.
+
+	Historico (era NVIDIA): o onnxruntime-gpu nao achava as libs CUDA instaladas via pip
+	porque ficavam dentro do site-packages, fora do caminho do linker dinamico - precisava
+	de LD_LIBRARY_PATH explicito, senao caia silenciosamente pra CPU.
+
+	Hoje (AMD/ROCm): o padrao e' CPU (ver DEFAULT_EXECUTION_PROVIDER), que nao precisa de
+	biblioteca de GPU nenhuma. A funcao e' mantida porque o mesmo problema de linker se
+	repete no ROCm - as libs vem em site-packages/_rocm_sdk_core ou equivalente - entao a
+	varredura fica generica: registra qualquer diretorio 'lib' dos SDKs de GPU presentes.
+	Se nenhum existir (caso do modo CPU), o ambiente volta inalterado."""
 	env = build_subprocess_env()
 	site_packages = os.path.join(MINICONDA_DIR, "envs", FACEFUSION_CONDA_ENV, "lib", "python3.11", "site-packages")
-	nvidia_dir = os.path.join(site_packages, "nvidia")
-	if os.path.isdir(nvidia_dir):
-		lib_dirs = [
-			os.path.join(nvidia_dir, pkg, "lib")
-			for pkg in os.listdir(nvidia_dir)
-			if os.path.isdir(os.path.join(nvidia_dir, pkg, "lib"))
+
+	lib_dirs: list[str] = []
+	for sdk_dir_name in ("_rocm_sdk_core", "rocm", "nvidia"):
+		sdk_dir = os.path.join(site_packages, sdk_dir_name)
+		if not os.path.isdir(sdk_dir):
+			continue
+		direct_lib = os.path.join(sdk_dir, "lib")
+		if os.path.isdir(direct_lib):
+			lib_dirs.append(direct_lib)
+		lib_dirs += [
+			os.path.join(sdk_dir, pkg, "lib")
+			for pkg in sorted(os.listdir(sdk_dir))
+			if os.path.isdir(os.path.join(sdk_dir, pkg, "lib"))
 		]
+
+	if lib_dirs:
 		existing = env.get("LD_LIBRARY_PATH", "")
 		env["LD_LIBRARY_PATH"] = ":".join(lib_dirs + ([existing] if existing else []))
 	return env
@@ -167,12 +174,15 @@ def build_tts_command(
 def build_demucs_command(
 	input_path: str, output_vocals: str, output_instrumental: Optional[str] = None, model: str = "htdemucs",
 ) -> list[str]:
-	"""Demucs (Meta AI) roda num ambiente Conda proprio (noise-pipeline). Achado real: o
-	torch instalado por padrao via pip (2.6.0+cu124) da 'CUDA error: no kernel image is
-	available for execution on the device' nessa RTX 5060 Ti - GPU nova demais pros kernels
-	pre-compilados dessa versao. Corrigido com torch 2.12.1+cu130 (mesma versao que ja
-	funciona no vfx-pipeline/ComfyUI). Tambem precisou de 'torchcodec' extra, que o torchaudio
-	dessa versao usa por padrao pra salvar audio (nao vem junto por padrao)."""
+	"""Demucs (Meta AI) roda num ambiente Conda proprio (noise-pipeline).
+
+	Na migracao pra AMD, o torch deste ambiente passa a vir das wheels ROCm da AMD
+	(repo.amd.com/rocm/whl/gfx120X-all/), nao mais das wheels CUDA. Continua precisando do
+	'torchcodec' extra, que o torchaudio usa por padrao pra salvar audio e nao vem junto.
+
+	Licao herdada da era NVIDIA que segue valendo: fixar versao de torch por conta propria
+	neste ambiente ja quebrou uma vez (kernels pre-compilados nao cobriam a GPU). Manter
+	alinhado com o vfx-pipeline/ComfyUI em vez de divergir."""
 	conda_python = os.path.join(MINICONDA_DIR, "envs", DEMUCS_CONDA_ENV, "bin", "python")
 	cmd = [conda_python, DEMUCS_SCRIPT_PATH, "--input", input_path, "--output-vocals", output_vocals, "--model", model]
 	if output_instrumental:

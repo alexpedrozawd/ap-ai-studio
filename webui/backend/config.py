@@ -6,9 +6,11 @@ abaixo sao copias deliberadas dos mesmos usados la', nao uma fonte unica compart
 Se um dia divergirem, e' sinal de que algo mudou dos dois lados e precisa de atencao.
 """
 
+import os
+
 COMFYUI_HOST = "127.0.0.1"
 COMFYUI_PORT = 8288
-VFX_DIR = "/home/ap/ap-ai-studio"
+VFX_DIR = os.environ.get("AP_AI_STUDIO_HOME", "/var/home/apsrv/ap-ai-studio")
 COMFYUI_DIR = f"{VFX_DIR}/ai_pipeline/ComfyUI"
 
 VFX_PY = f"{VFX_DIR}/miniconda3/envs/vfx-pipeline/bin/python"

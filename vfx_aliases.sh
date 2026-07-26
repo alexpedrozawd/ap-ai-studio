@@ -10,7 +10,7 @@
 # Tudo que vier depois dos argumentos obrigatorios é repassado direto pro
 # run_vfx.py - ex: vfx-rosto origem.jpg alvo.mp4 saida.mp4 --chunk-seconds 30
 
-VFX_DIR="/home/ap/ap-ai-studio"
+VFX_DIR="${AP_AI_STUDIO_HOME:-/var/home/apsrv/ap-ai-studio}"
 VFX_PY="$VFX_DIR/miniconda3/envs/vfx-pipeline/bin/python"
 VFX_SCRIPT="$VFX_DIR/run_vfx.py"
 FF_PY="$VFX_DIR/miniconda3/envs/facefusion-pipeline/bin/python"
@@ -62,13 +62,27 @@ vfx-parar() {
 	echo "Comando de encerramento enviado ao ComfyUI (porta ${COMFYUI_PORT})."
 }
 
+_vfx_vram() {
+	local total used
+	total=$(cat /sys/class/drm/card*/device/mem_info_vram_total 2>/dev/null | head -1)
+	used=$(cat /sys/class/drm/card*/device/mem_info_vram_used 2>/dev/null | head -1)
+	if [ -n "$total" ] && [ -n "$used" ]; then
+		awk -v t="$total" -v u="$used" 'BEGIN {
+			printf "usado %.1f GiB | livre %.1f GiB | total %.1f GiB\n",
+			u/1073741824, (t-u)/1073741824, t/1073741824
+		}'
+	else
+		echo "leitura de VRAM do amdgpu indisponivel"
+	fi
+}
+
 vfx-status() {
 	echo "--- ComfyUI ---"
 	if _vfx_comfyui_up; then echo "no ar em ${COMFYUI_HOST}:${COMFYUI_PORT}"; else echo "desligado"; fi
-	echo "--- VRAM ---"
-	nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv 2>/dev/null || echo "nvidia-smi indisponivel"
-	echo "--- Disco (/) ---"
-	df -h / | tail -1
+	echo "--- VRAM (amdgpu) ---"
+	_vfx_vram
+	echo "--- Disco ($VFX_DIR) ---"
+	df -h "$VFX_DIR" | tail -1
 }
 
 # --- funções do pipeline ---
@@ -234,6 +248,6 @@ AP AI Studio - atalhos disponiveis (padrao: nome curto + argumentos obrigatorios
 
 Qualquer flag extra do run_vfx.py (--dry-run, --auto-approve, --width, --fps etc.)
 pode ser adicionada no final de qualquer comando acima.
-Manual completo: /home/ap/ap-ai-studio/MANUAL_USO.md
+Manual completo: $VFX_DIR/MANUAL_USO.md
 EOF
 }

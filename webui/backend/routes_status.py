@@ -1,7 +1,7 @@
 import asyncio
+import glob
 import os
 import shutil
-import subprocess
 from typing import Optional
 
 import aiohttp
@@ -25,26 +25,40 @@ async def comfyui_up() -> bool:
 		return False
 
 
-NVIDIA_SMI_PATH = "/usr/bin/nvidia-smi"
+AMDGPU_VRAM_TOTAL_GLOB = "/sys/class/drm/card*/device/mem_info_vram_total"
+AMDGPU_VRAM_USED_GLOB = "/sys/class/drm/card*/device/mem_info_vram_used"
 
 
 def _vram_info() -> Optional[dict]:
-	# Achado do SAST (bandit B607): caminho absoluto em vez de depender do PATH -
-	# evita que um PATH manipulado troque o binario real por um falso.
+	"""VRAM da GPU AMD lida do sysfs do amdgpu (migrado de nvidia-smi).
+
+	Sem subprocesso: some junto o achado do SAST (bandit B607) sobre caminho absoluto de
+	binario, porque nao ha mais binario externo envolvido. O amdgpu expoe total e usado em
+	bytes; o livre e' a diferenca (nao existe campo 'free' direto, como havia no nvidia-smi).
+	"""
 	try:
-		out = subprocess.check_output(
-			[NVIDIA_SMI_PATH, "--query-gpu=memory.used,memory.free,memory.total", "--format=csv,noheader,nounits"],
-			text=True, timeout=5,
-		)
-		used, free, total = (int(x) for x in out.strip().splitlines()[0].split(","))
-		return {"used_mb": used, "free_mb": free, "total_mb": total}
+		total_files = sorted(glob.glob(AMDGPU_VRAM_TOTAL_GLOB))
+		used_files = sorted(glob.glob(AMDGPU_VRAM_USED_GLOB))
+		if not total_files or not used_files:
+			return None
+		with open(total_files[0]) as f:
+			total_bytes = int(f.read().strip())
+		with open(used_files[0]) as f:
+			used_bytes = int(f.read().strip())
+		free_bytes = total_bytes - used_bytes
+		if free_bytes < 0:
+			return None
+		mb = 1024 * 1024
+		return {"used_mb": used_bytes // mb, "free_mb": free_bytes // mb, "total_mb": total_bytes // mb}
 	except Exception:
 		return None
 
 
 @router.get("/status")
 async def get_status():
-	disk = shutil.disk_usage("/")
+	# Nao medir "/": no Bazzite a raiz e' composefs somente-leitura (~44MB, sempre 100%
+	# ocupada). Medir VFX_DIR, que e' onde os arquivos sao de fato gravados.
+	disk = shutil.disk_usage(VFX_DIR)
 	return {
 		"comfyui_up": await comfyui_up(),
 		"vram": _vram_info(),

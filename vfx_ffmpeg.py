@@ -16,7 +16,7 @@ from vfx_comfyui import (
 	submit_comfyui_prompt,
 	wait_for_comfyui_prompt,
 )
-from vfx_config import DISK_SAFETY_MARGIN_GB, GateDenied, PIPELINE_PATH
+from vfx_config import DISK_CHECK_PATH, DISK_SAFETY_MARGIN_GB, GateDenied, PIPELINE_PATH, VAAPI_DEVICE
 from vfx_core import check_binary
 from vfx_facefusion import build_facefusion_command, build_facefusion_env
 from vfx_gates import get_disk_free_gb, run_in_memory_jail
@@ -49,16 +49,30 @@ def build_ffmpeg_mastering_command(
 	processed_video_path: str,
 	output_path: str,
 	fps: float = 24.0,
-	video_codec: str = "h264_nvenc",
+	video_codec: str = "h264_vaapi",
 ) -> list[str]:
 	"""Costura o video processado (saida do FaceFusion ou do Wan2.2) de volta com o
 	audio/legendas/metadados do arquivo original intactos. Video vem do arquivo processado
 	(-map 1:v:0); audio e legendas vem do original sem recodificar (-c:a copy -c:s copy,
 	preserva 5.1/7.1 e faixas de legenda bit-a-bit). CFR via `-fps_mode cfr` (nao `-vsync`,
 	que esta deprecated no ffmpeg 6.x instalado neste servidor). Matriz de cor bt709 fixada
-	explicitamente para evitar shift de cor entre o clipe processado e o original."""
-	return [
-		"ffmpeg", "-y",
+	explicitamente para evitar shift de cor entre o clipe processado e o original.
+
+	Encoder: migrado de h264_nvenc (NVIDIA) pra h264_vaapi (AMD). NAO e' so' troca de nome -
+	VAAPI exige inicializar o device (-vaapi_device) e subir os frames pra GPU
+	(format=nv12,hwupload) ANTES do encoder; sem isso o ffmpeg falha com 'Function not
+	implemented'. A AMD descontinuou o AMF nos drivers Linux recentes e orienta VA-API.
+
+	Passar video_codec='libx264' desativa o caminho de hardware e volta pra CPU (mais lento,
+	qualidade melhor a mesmo bitrate) - util pro render final quando a qualidade importa
+	mais que o tempo."""
+	cmd = ["ffmpeg", "-y"]
+
+	hardware = video_codec.endswith("_vaapi")
+	if hardware:
+		cmd += ["-vaapi_device", VAAPI_DEVICE]
+
+	cmd += [
 		"-i", original_path,
 		"-i", processed_video_path,
 		"-map", "1:v:0",
@@ -70,11 +84,19 @@ def build_ffmpeg_mastering_command(
 		"-color_primaries", "bt709",
 		"-color_trc", "bt709",
 		"-colorspace", "bt709",
+	]
+
+	if hardware:
+		# nv12 e' o formato que o encoder VAAPI aceita; hwupload move o frame pra VRAM.
+		cmd += ["-vf", "format=nv12,hwupload"]
+
+	cmd += [
 		"-c:v", video_codec,
 		"-c:a", "copy",
 		"-c:s", "copy",
 		output_path,
 	]
+	return cmd
 
 
 # --- Fase 7: processar vídeos longos em pedaços (cenas/filmes inteiros) ---
@@ -162,7 +184,7 @@ async def process_long_faceswap(
 
 	processed_chunks = []
 	for i, raw_chunk in enumerate(raw_chunks):
-		free_gb = get_disk_free_gb("/")
+		free_gb = get_disk_free_gb(DISK_CHECK_PATH)
 		if free_gb < DISK_SAFETY_MARGIN_GB:
 			raise GateDenied(f"Gate 3: espaco insuficiente no meio do processamento em pedacos ({free_gb:.1f}GB livres)")
 		processed_path = os.path.join(chunk_dir, "processed", f"chunk_{i:04d}.mp4")
@@ -285,7 +307,7 @@ async def process_long_upscale(
 
 	processed_chunks = []
 	for i, raw_chunk in enumerate(raw_chunks):
-		free_gb = get_disk_free_gb("/")
+		free_gb = get_disk_free_gb(DISK_CHECK_PATH)
 		if free_gb < DISK_SAFETY_MARGIN_GB:
 			raise GateDenied(f"Gate 3: espaco insuficiente no meio do upscale em pedacos ({free_gb:.1f}GB livres)")
 		processed_path = os.path.join(chunk_dir, "processed", f"chunk_{i:04d}.mp4")

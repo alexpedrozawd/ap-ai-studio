@@ -3,6 +3,7 @@ antes de qualquer operacao pesada - ver PROMPT_MASTER.md Fase 3 pro design origi
 """
 
 import asyncio
+import glob
 import logging
 import resource
 import shutil
@@ -11,12 +12,14 @@ import uuid
 from typing import Optional
 
 from vfx_config import (
+	AMDGPU_VRAM_TOTAL_GLOB,
+	AMDGPU_VRAM_USED_GLOB,
+	DISK_CHECK_PATH,
 	DISK_SAFETY_MARGIN_GB,
 	GateDenied,
 	MEMORY_MAX_DEFAULT,
 	MEMORY_MAX_VIDEO,
 	MEMORY_SWAP_MAX_VIDEO,
-	NVIDIA_SMI_PATH,
 	PIPELINE_PATH,
 	VRAM_PEAK_ALERT_GB,
 )
@@ -116,13 +119,30 @@ async def run_in_memory_jail(
 # --- Gate 2: Pico de VRAM, RAM e Swap ---
 
 async def get_vram_free_mb() -> Optional[int]:
+	"""VRAM livre em MB, lida do sysfs do amdgpu (RX 9070 XT / gfx1201).
+
+	Migrado de nvidia-smi: o sysfs nao depende de nenhum pacote instalado (rocm-smi nao
+	esta presente e instalar exigiria layering na imagem imutavel do Bazzite), e nao ha
+	processo externo pra falhar. O amdgpu expoe total e usado em bytes; o livre e' a
+	diferenca - nao ha campo 'free' direto, diferente do nvidia-smi.
+
+	Retorna None se a leitura falhar. O chamador (Gate 2) trata None como "assume o pior",
+	nunca como "VRAM sobrando" - comportamento preservado da versao NVIDIA.
+	"""
 	def _query():
 		try:
-			out = subprocess.check_output(
-				[NVIDIA_SMI_PATH, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-				text=True, timeout=5,
-			)
-			return int(out.strip().splitlines()[0])
+			total_files = sorted(glob.glob(AMDGPU_VRAM_TOTAL_GLOB))
+			used_files = sorted(glob.glob(AMDGPU_VRAM_USED_GLOB))
+			if not total_files or not used_files:
+				return None
+			with open(total_files[0]) as f:
+				total_bytes = int(f.read().strip())
+			with open(used_files[0]) as f:
+				used_bytes = int(f.read().strip())
+			free_bytes = total_bytes - used_bytes
+			if free_bytes < 0:
+				return None
+			return free_bytes // (1024 * 1024)
 		except Exception:
 			return None
 	return await asyncio.to_thread(_query)
@@ -164,10 +184,10 @@ async def gate_2_vram_check(
 ) -> dict:
 	vram_free_mb = await get_vram_free_mb()
 	if vram_free_mb is None:
-		# nvidia-smi falhou/indisponivel: assume o pior (alerta), nao o melhor - uma leitura
-		# desconhecida nao pode ser tratada como "VRAM livre o suficiente".
+		# leitura do sysfs do amdgpu falhou/indisponivel: assume o pior (alerta), nao o
+		# melhor - uma leitura desconhecida nao pode ser tratada como "VRAM livre o suficiente".
 		peak_alert = True
-		detail = "VRAM livre=DESCONHECIDA (nvidia-smi falhou)"
+		detail = "VRAM livre=DESCONHECIDA (leitura do amdgpu falhou)"
 	else:
 		vram_free_gb = vram_free_mb / 1024
 		peak_alert = vram_free_gb < VRAM_PEAK_ALERT_GB
@@ -219,14 +239,21 @@ async def gate_2_vram_check(
 
 # --- Gate 3: I/O de Disco (nunca pulável, mesmo com --auto-approve) ---
 
-def get_disk_free_gb(path: str = "/") -> float:
+def get_disk_free_gb(path: str = DISK_CHECK_PATH) -> float:
+	"""Espaco livre no sistema de arquivos que contem `path`.
+
+	CUIDADO: nao medir "/" no Bazzite. A raiz e' composefs somente-leitura (~44MB, 100%
+	ocupada por definicao, independente do disco real). Medir "/" fazia o Gate 3 abortar
+	todo o pipeline com "espaco insuficiente" havendo centenas de GB livres em /var/home.
+	O default aponta pra onde os arquivos sao de fato escritos.
+	"""
 	usage = shutil.disk_usage(path)
 	return usage.free / (1024**3)
 
 
 async def gate_3_disk_check(logger: logging.Logger, auto_approve: bool = False, dry_run: bool = False) -> dict:
-	free_gb = get_disk_free_gb("/")
-	detail = f"espaco livre em /={free_gb:.1f}GB (margem minima={DISK_SAFETY_MARGIN_GB}GB)"
+	free_gb = get_disk_free_gb(DISK_CHECK_PATH)
+	detail = f"espaco livre em {DISK_CHECK_PATH}={free_gb:.1f}GB (margem minima={DISK_SAFETY_MARGIN_GB}GB)"
 
 	if free_gb < DISK_SAFETY_MARGIN_GB:
 		log_gate_decision(logger, "3-disco", "abortado (abaixo da margem)", detail)
@@ -237,7 +264,7 @@ async def gate_3_disk_check(logger: logging.Logger, auto_approve: bool = False, 
 		return {"free_gb": free_gb}
 
 	# auto_approve é ignorado de propósito: Gate 3 sempre pede confirmação manual.
-	approved = await confirm(f"Gate 3 - I/O de disco (NVENC): {detail}. Prosseguir com escrita em {PIPELINE_PATH}?")
+	approved = await confirm(f"Gate 3 - I/O de disco (VAAPI): {detail}. Prosseguir com escrita em {PIPELINE_PATH}?")
 	if not approved:
 		log_gate_decision(logger, "3-disco", "negado", detail)
 		raise GateDenied("Gate 3 negado pelo usuario")

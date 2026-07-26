@@ -214,7 +214,7 @@ def test_gate2_forced_low_vram_triggers_alert_and_can_be_denied(monkeypatch):
 
 
 def test_gate2_unknown_vram_does_not_crash_and_reports_none(monkeypatch):
-	"""Achado da revisao: quando nvidia-smi falha, get_vram_free_mb() retorna None.
+	"""Achado da revisao: quando a leitura de VRAM do amdgpu falha, get_vram_free_mb() retorna None.
 	Antes da correcao, `(vram_free_mb or 0) / 1024` mascarava isso como 0GB (tratado
 	como 'nao alerta' por ser < VRAM_PEAK_ALERT_GB mas nao explicitamente marcado como
 	desconhecido). Agora o caminho None e tratado explicitamente e nao derruba com TypeError."""
@@ -530,19 +530,26 @@ def test_demucs_command_uses_its_own_conda_env_and_two_stems_mode():
 	assert cmd[cmd.index("--output-instrumental") + 1] == "/tmp/resto.wav"
 
 
-def test_facefusion_env_sets_ld_library_path_for_cuda(monkeypatch, tmp_path):
-	"""Achado real: onnxruntime-gpu no ambiente facefusion-pipeline nao achava as libs CUDA
-	instaladas via pip (nvidia-cublas-cu12 etc ficam dentro do site-packages, fora do caminho
-	de busca do linker) - caia pra CPU silenciosamente (sem erro visivel no retorno, so lento:
-	46s vs 1.5s medido ao vivo). LD_LIBRARY_PATH resolve isso."""
+def test_facefusion_env_sets_ld_library_path_for_gpu_sdk(monkeypatch, tmp_path):
+	"""Achado real (era NVIDIA, vale igual no ROCm): as libs do SDK de GPU instaladas via pip
+	ficam dentro do site-packages, fora do caminho de busca do linker - o onnxruntime caia pra
+	CPU silenciosamente (sem erro no retorno, so lento: 46s vs 1.5s medido ao vivo).
+	LD_LIBRARY_PATH resolve. A varredura e' generica de proposito pra cobrir os dois SDKs."""
 	fake_env_root = tmp_path / "envs" / "facefusion-pipeline" / "lib" / "python3.11" / "site-packages"
-	nvidia_dir = fake_env_root / "nvidia"
-	(nvidia_dir / "cublas" / "lib").mkdir(parents=True)
-	(nvidia_dir / "cudnn" / "lib").mkdir(parents=True)
+	rocm_dir = fake_env_root / "_rocm_sdk_core"
+	(rocm_dir / "lib").mkdir(parents=True)
 	monkeypatch.setattr("vfx_facefusion.MINICONDA_DIR", str(tmp_path))
 	env = build_facefusion_env()
-	assert "cublas/lib" in env["LD_LIBRARY_PATH"]
-	assert "cudnn/lib" in env["LD_LIBRARY_PATH"]
+	assert "_rocm_sdk_core/lib" in env["LD_LIBRARY_PATH"]
+
+
+def test_facefusion_env_unchanged_when_no_gpu_sdk_present(monkeypatch, tmp_path):
+	"""Modo CPU (o padrao nesta GPU): sem SDK de GPU instalado, o ambiente sai sem
+	LD_LIBRARY_PATH inventado - nao pode quebrar quem roda em CPU."""
+	(tmp_path / "envs" / "facefusion-pipeline" / "lib" / "python3.11" / "site-packages").mkdir(parents=True)
+	monkeypatch.setattr("vfx_facefusion.MINICONDA_DIR", str(tmp_path))
+	env = build_facefusion_env()
+	assert "LD_LIBRARY_PATH" not in env or "_rocm_sdk_core" not in env.get("LD_LIBRARY_PATH", "")
 
 
 def test_background_remover_and_lip_syncer_use_correct_processor_flag():
