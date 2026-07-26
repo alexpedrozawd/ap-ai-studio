@@ -101,10 +101,45 @@ contaminar a GPU do desktop; e atualizações do Bazzite não quebram o ambiente
 |---|---|---|
 | 1 | Análise de impacto vs `security-audit` | ✅ concluída (§1) |
 | 2 | Pesquisa da stack AMD (ROCm, onnxruntime, VAAPI) | ✅ concluída (§2) |
-| 3 | Corrigir Gate 3 (disco/composefs) e caminhos hardcoded | em andamento |
-| 4 | Migrar código NVIDIA → AMD | pendente |
-| 5 | Atualizar documentação (remover Ubuntu/NVIDIA) | pendente |
-| 6 | Construir ambiente (distrobox + ROCm + modelos) | pendente |
+| 3 | Corrigir Gate 3 (disco/composefs) e caminhos hardcoded | ✅ concluída (commit `fef3186`) |
+| 4 | Migrar código NVIDIA → AMD | ✅ concluída (commit `fef3186`) |
+| 5 | Atualizar documentação (remover Ubuntu/NVIDIA) | ✅ concluída (commit `b14247b`) |
+| 6a | Contêiner distrobox + PyTorch ROCm | ✅ **GPU validada** (ver §3.1) |
+| 6b | ComfyUI, custom nodes, FaceFusion, demais ambientes | em andamento |
+| 6c | Download dos modelos | pendente |
+| 7 | Regerar `requirements/` a partir dos ambientes reais | pendente |
+| 8 | Configurar e subir a webui (`systemd --user`) | pendente |
+
+### 3.1 Validação da GPU (2026-07-26 20:38) — a premissa se confirmou
+
+```
+torch                : 2.11.0+rocm7.13.0
+compilado p/ HIP/ROCm: 7.13.99004
+GPU disponivel       : True
+nome                 : AMD Radeon RX 9070 XT
+arquitetura          : gfx1201
+VRAM total           : 15.9 GiB
+Multiplicacao 4096x4096 na GPU: OK (resultado finito, sem NaN/Inf)
+```
+
+O teste **não** se contentou com `torch.cuda.is_available()`. Rodou uma multiplicação de
+matrizes real e verificou que o resultado é finito, de propósito: na RTX 5060 Ti o
+`is_available()` retornava `True` enquanto os kernels da arquitetura não existiam, e a
+falha só aparecia no meio de um render. Aqui a computação de fato aconteceu.
+
+### 3.2 Como acompanhar o build
+
+Os estágios rodam como unidades `systemd --user` e **sobrevivem à desconexão do SSH**
+(o `linger` já está ativo para o usuário):
+
+```bash
+systemctl --user status ai-studio-stage2          # estado atual
+journalctl --user -u ai-studio-stage2 -f          # log ao vivo
+journalctl --user -u ai-studio-stage1 --no-pager  # log do estágio já concluído
+```
+
+Os scripts (`build/stage1_base.sh`, `build/stage2_apps.sh`) são **idempotentes**: podem
+ser reexecutados sem estragar o que já foi feito.
 
 ---
 
