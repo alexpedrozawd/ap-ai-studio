@@ -75,9 +75,11 @@ trabalhando. Perguntar tudo de uma vez só no resumo final, quando ele voltar.
    mas funciona. Instalado, `torch` ROCm reafirmado, **testado de verdade**: `--mode
    music` gerou WAV válido (PCM16 estéreo 32kHz, 4.94s) em 3min32s. `--mode music`
    agora funciona.
-2. **`tailscale0` na zona `trusted` do firewalld** — exige root/senha, que esta sessão
-   não tem. Sem isso, quando o usuário aplicar o hardening do `security-audit`, a webui
-   ficaria inacessível via Tailscale. Fica documentado, sem ação possível daqui.
+2. ~~**`tailscale0`/tailnet na zona `trusted` do firewalld**~~ — ✅ RESOLVIDO (2026-07-27,
+   comando rodado pelo usuário via `sudo`, confirmado ao vivo): `sources: 100.64.0.0/10
+   fd7a:115c:a1e0::/48`, `target: ACCEPT`. Webui seguiu respondendo HTTP 200 depois, e
+   as rich rules de SSH continuaram intactas (nada removido, só adicionado — por
+   origem, não por interface, mesmo desenho já validado pelo `security-audit`).
    <!-- Novas decisões pendentes encontradas durante a execução autônoma: adicionar aqui -->
 
 ### Riscos reais encontrados — não bloqueiam, mas o usuário precisa saber
