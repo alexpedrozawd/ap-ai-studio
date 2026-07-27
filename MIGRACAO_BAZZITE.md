@@ -109,7 +109,7 @@ contaminar a GPU do desktop; e atualizações do Bazzite não quebram o ambiente
 | 6c | Modelos | ✅ recuperados do backup (52G, 286 MB/s) |
 | 6d | ComfyUI validado ponta a ponta na GPU | ✅ ver §7 |
 | 7 | Regerar `requirements/` a partir dos ambientes reais | pendente |
-| 8 | Configurar e subir a webui (`systemd --user`) | pendente |
+| 8 | Configurar e subir a webui (`systemd --user`) | ✅ no ar (ver §11) |
 
 ### 3.1 Validação da GPU (2026-07-26 20:38) — a premissa se confirmou
 
@@ -435,3 +435,50 @@ Projetos/ap-ai-studio/
 | `test_run_vfx` / `standalone` / `backend` | 87/87 · 6/6 · 41/44 |
 
 `~/ap-ai-studio` não existe mais. O home tem apenas os diretórios do usuário.
+
+
+---
+
+## 11. Interface web no ar (2026-07-27)
+
+Frontend reconstruído do zero (o `node_modules` da tentativa interrompida foi descartado,
+não reaproveitado): **lint sem avisos, 48/48 testes, build gerado** em
+`webui/backend/static/`.
+
+Com o build presente, as 3 falhas restantes do backend caíram: **44/44**.
+
+### Suítes completas
+
+| Suíte | Resultado |
+|---|---|
+| `test_run_vfx.py` | 87/87 |
+| `test_standalone_scripts.py` | 6/6 |
+| `webui/backend/test_backend.py` | **44/44** |
+| frontend (Vitest) | 48/48 |
+| **Total** | **185 testes** |
+
+### Serviço
+
+`~/.config/systemd/user/vfx-webui.service`, habilitado (`enabled`) e com `Linger=yes` —
+sobe no boot e sobrevive a logout.
+
+O `.service` teve os caminhos corrigidos para a raiz consolidada. Detalhe que vale
+registrar: `WorkingDirectory` **não aceita variável vinda do `EnvironmentFile`** (o
+systemd resolve esse campo antes de ler o arquivo), então ele usa `%h/Projetos/...`
+literal, enquanto host e porta continuam vindo do env — que é o que não pode ir pro git.
+
+### Verificado ao vivo
+
+```
+GET /              -> 200
+GET /rosto         -> 200   (sub-rota do React Router, sem 404)
+GET /api/status    -> {"vram":{"free_mb":13729,"total_mb":16304},
+                       "disk_free_gb":128.5,"disk_total_gb":474.4}
+```
+
+O `/api/status` é a prova visível das duas correções da migração: a VRAM vem do sysfs do
+`amdgpu` (não de `nvidia-smi`) e o disco reporta **128,5 GB livres** — antes, medindo `/`,
+teria reportado zero e o Gate 3 recusaria qualquer job.
+
+**Resiliência testada, não presumida:** `kill -9` no processo principal; o systemd
+reergueu em 14 s com PID novo e a interface voltou a responder 200.

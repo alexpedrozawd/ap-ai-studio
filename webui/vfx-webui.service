@@ -13,8 +13,12 @@ Type=simple
 # publico, e a versao anterior deste arquivo vazou o IP Tailscale do servidor antigo.
 # Ver webui/vfx-webui.env.example para gerar o seu.
 EnvironmentFile=%h/.config/ap-ai-studio/webui.env
-WorkingDirectory=%h/ap-ai-studio/webui/backend
-ExecStart=%h/ap-ai-studio/miniconda3/envs/webui-pipeline/bin/python -m uvicorn main:app --host ${WEBUI_HOST} --port ${WEBUI_PORT}
+# %h = home do usuario, resolvido pelo systemd - o arquivo serve qualquer usuario sem
+# edicao. O caminho segue a regra do projeto: repositorios ficam em ~/Projetos.
+# WorkingDirectory NAO aceita variavel do EnvironmentFile (o systemd le o arquivo depois
+# de resolver este campo), por isso aqui e' literal enquanto o host/porta vem do env.
+WorkingDirectory=%h/Projetos/ap-ai-studio/webui/backend
+ExecStart=%h/Projetos/ap-ai-studio/miniconda3/envs/webui-pipeline/bin/python -m uvicorn main:app --host ${WEBUI_HOST} --port ${WEBUI_PORT}
 Restart=on-failure
 # Reinicio generoso: se o tailscaled demorar a estabelecer a interface, o bind falha
 # algumas vezes antes de dar certo. Sem isso o servico desiste e a webui fica fora do ar
