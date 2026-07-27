@@ -1,5 +1,5 @@
 comfyui:
-     base_path: /var/home/apsrv/ap-ai-studio/ai_pipeline/models_hub/
+     base_path: /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/models_hub/
      is_default: true
      checkpoints: models/checkpoints/
      configs: models/configs/

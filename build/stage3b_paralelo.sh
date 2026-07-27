@@ -10,7 +10,8 @@
 # estagio 3 chegar num arquivo que este script ja terminou, ele pula.
 set -Euo pipefail
 
-STUDIO_HOME="${AP_AI_STUDIO_HOME:-/var/home/apsrv/ap-ai-studio}"
+# Auto-localizavel: os scripts vivem em <raiz>/build/, entao a raiz e' um nivel acima.
+STUDIO_HOME="${AP_AI_STUDIO_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 MODELS="$STUDIO_HOME/ai_pipeline/ComfyUI/models"
 HF="https://huggingface.co"
 PARALELO=4   # conexoes simultaneas

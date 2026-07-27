@@ -8,7 +8,8 @@
 # Idempotente: pode ser reexecutado sem estragar nada.
 set -Eeuo pipefail
 
-STUDIO_HOME="${AP_AI_STUDIO_HOME:-/var/home/apsrv/ap-ai-studio}"
+# Auto-localizavel: os scripts vivem em <raiz>/build/, entao a raiz e' um nivel acima.
+STUDIO_HOME="${AP_AI_STUDIO_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 MINICONDA_DIR="$STUDIO_HOME/miniconda3"
 LOG_DIR="$STUDIO_HOME/build/logs"
 mkdir -p "$LOG_DIR"

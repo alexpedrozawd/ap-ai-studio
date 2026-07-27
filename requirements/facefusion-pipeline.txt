@@ -30,7 +30,7 @@ onnx==1.21.0
 onnxruntime==1.26.0
 opencv-python==4.13.0.92
 orjson==3.11.9
-packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1777103621/work
+packaging==26.2
 pandas==2.3.3
 pillow==11.3.0
 protobuf==7.35.1

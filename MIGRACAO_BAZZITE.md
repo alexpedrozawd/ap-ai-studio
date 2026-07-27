@@ -369,3 +369,69 @@ ignorá-lo em outro seria incoerente.
 
 Opções: (a) instalar o fork mesmo assim; (b) deixar o `--mode music` indisponível;
 (c) procurar alternativa mantida. Sem decisão, todos os outros 8 modos funcionam.
+
+
+---
+
+## 10. Consolidação: tudo dentro do repositório (2026-07-26, madrugada)
+
+A decisão do usuário: nenhum resíduo no home, nenhum projeto dividido. `~/ap-ai-studio`
+deixou de existir.
+
+### Como foi feito
+
+1. **`ai_pipeline` (52 GB) movido**, não copiado — mesmo btrfs, `mv` levou **9 ms**.
+2. **Miniconda reinstalado** no caminho novo. Não foi movido de propósito: instalações
+   conda gravam caminhos absolutos em shebangs, `conda-meta` e bibliotecas — mover
+   quebraria de forma silenciosa, que é o pior tipo de quebra.
+3. **`~/ap-ai-studio` apagado** (26 GB do Miniconda antigo).
+
+### Verificação antes de apagar — e o que ela pegou
+
+Antes do `rm -rf`, varredura por referências ao caminho antigo. **Encontrou seis**, uma
+delas crítica:
+
+- **`extra_model_paths.yaml` ainda apontava para `~/ap-ai-studio/ai_pipeline/models_hub/`.**
+  Apagar sem corrigir teria feito o ComfyUI perder os 52 GB de modelos — com a pasta
+  ainda em disco, mas invisível para ele.
+- `build/chain_stage3.sh`, `stage1/stage3/stage3b` e `vfx-webui.env.example` também
+  tinham o caminho antigo como default.
+
+Os scripts de build passaram a derivar a raiz da própria localização (`<raiz>/build/`),
+sem caminho fixo — mesma abordagem já aplicada ao `vfx_config.py` e ao `vfx_aliases.sh`.
+
+### Três defeitos nos `requirements/` que eu havia regenerado
+
+Descobertos porque a reinstalação no caminho novo **falhou de verdade** — não teriam
+aparecido sem reexecutar:
+
+1. **`packaging @ file:///home/conda/feedstock_root/...`** em todos os 5 arquivos. O
+   `pip freeze` num ambiente conda grava o caminho de compilação da máquina que gerou o
+   pacote. Esse caminho não existe em lugar nenhum: a reinstalação morria com `OSError`.
+2. **`filetype` ausente** do requirements da webui, embora `jobs.py` o importe. Causa: eu
+   congelei um ambiente que **já estava incompleto** (o estágio 2 tinha caído no fallback
+   de dependências básicas) e registrei aquilo como verdade.
+3. Faltavam também `httpx` e `pytest`, necessários para a suíte do backend rodar.
+
+**Lição:** `pip freeze` documenta o ambiente que existe, não o que o código precisa. Se o
+ambiente estiver errado, o arquivo gerado registra o erro com aparência de autoridade. A
+fonte da verdade é o que o código importa — conferido com `grep` nos `import` do backend.
+
+### Estado final verificado
+
+```
+Projetos/ap-ai-studio/
+├── ai_pipeline/     52 GB  (ComfyUI, facefusion, models_hub)
+├── miniconda3/      26 GB  (5 ambientes)
+├── build/                  (scripts, auto-localizáveis)
+├── webui/, run_vfx.py, vfx_*.py, docs...
+```
+
+| Verificação | Resultado |
+|---|---|
+| torch nos 3 ambientes | `2.11.0+rocm7.13.0`, GPU=True |
+| ComfyUI subindo do caminho novo | `Device: cuda:0 AMD Radeon RX 9070 XT : native` |
+| Modelos visíveis no `UnetLoaderGGUF` | 4/4 |
+| `test_run_vfx` / `standalone` / `backend` | 87/87 · 6/6 · 41/44 |
+
+`~/ap-ai-studio` não existe mais. O home tem apenas os diretórios do usuário.

@@ -53,7 +53,7 @@ networkx==3.6.1
 num2words==0.5.14
 numba==0.66.0
 numpy==2.4.6
-packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1777103621/work
+packaging==26.2
 pillow==12.3.0
 platformdirs==4.11.0
 pooch==1.9.0

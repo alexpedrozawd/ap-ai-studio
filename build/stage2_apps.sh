@@ -7,7 +7,8 @@
 # quebrado nao pode impedir o ComfyUI de existir. O resumo final lista o que falhou.
 set -Euo pipefail
 
-STUDIO_HOME="${AP_AI_STUDIO_HOME:-/var/home/apsrv/ap-ai-studio}"
+# Auto-localizavel: os scripts vivem em <raiz>/build/, entao a raiz e' um nivel acima.
+STUDIO_HOME="${AP_AI_STUDIO_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 MINICONDA_DIR="$STUDIO_HOME/miniconda3"
 PIPELINE="$STUDIO_HOME/ai_pipeline"
 CONDA="$MINICONDA_DIR/bin/conda"
