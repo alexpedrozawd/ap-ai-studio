@@ -3,11 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Verificacao visual manual da webui (Chrome headless real, nao mockado). Fora do CI/pre-commit de proposito - roda so' quando alguem decide conferir visualmente.",
+  "description": "Verificacao visual/interativa manual da webui (Chromium headless real via Playwright, nao mockado). Fora do CI/pre-commit de proposito - roda so' quando alguem (ou o Claude) decide conferir visualmente ou interagir de verdade com a interface.",
   "scripts": {
     "check": "node visual-check.mjs"
   },
   "devDependencies": {
-    "puppeteer-core": "^25.3.0"
+    "playwright": "^1.48.0"
   }
 }
