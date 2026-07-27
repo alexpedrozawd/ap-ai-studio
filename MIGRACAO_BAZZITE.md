@@ -106,7 +106,8 @@ contaminar a GPU do desktop; e atualizações do Bazzite não quebram o ambiente
 | 5 | Atualizar documentação (remover Ubuntu/NVIDIA) | ✅ concluída (commit `b14247b`) |
 | 6a | Contêiner distrobox + PyTorch ROCm | ✅ **GPU validada** (ver §3.1) |
 | 6b | ComfyUI, custom nodes, FaceFusion, demais ambientes | ✅ concluída, sem falhas |
-| 6c | Download dos modelos | 🔄 em andamento (~7,5 MB/s, 4 conexões) |
+| 6c | Modelos | ✅ recuperados do backup (52G, 286 MB/s) |
+| 6d | ComfyUI validado ponta a ponta na GPU | ✅ ver §7 |
 | 7 | Regerar `requirements/` a partir dos ambientes reais | pendente |
 | 8 | Configurar e subir a webui (`systemd --user`) | pendente |
 
@@ -212,3 +213,83 @@ Confirmado após instalar ComfyUI, 5 custom nodes, coqui-tts e demucs:
 FaceFusion com `onnxruntime 1.26.0` expondo apenas `CPUExecutionProvider` — como
 decidido. A reafirmação do torch depois de cada bloco de requirements (§2.1) provou-se
 necessária: era exatamente o que quebrava na era NVIDIA.
+
+
+---
+
+## 6. Restrição de uso declarada pelo usuário (2026-07-26)
+
+**Os três consumidores de GPU nunca rodam ao mesmo tempo.** É um de cada vez:
+AP AI Studio, `ap-tech-team` (LLMs via Ollama) **ou** jogos.
+
+Isso muda o dimensionamento: não é preciso reservar VRAM para coexistência, e cada um
+pode usar a placa inteira. Dois resíduos permanecem, ambos pequenos:
+
+1. **Residência do Ollama.** Ele mantém o modelo em VRAM por um tempo após o último uso
+   (`keep_alive`, padrão 5 min). Trocar de projeto rápido demais encontra a VRAM ainda
+   ocupada. O Gate 2 já cobre isso via `unload_ollama_model` (`vfx_gates.py`), herdado da
+   era do Qwen — hoje é no-op porque o Ollama não está instalado. Ao instalar, **conferir
+   o nome do modelo padrão**, que ainda é `"qwen"`.
+2. **`VRAM_PEAK_ALERT_GB = 15`** com o desktop KDE consumindo ~2,5 GB em repouso: o alerta
+   dispara quase sempre. Recalibrar para ~13 GB **com número medido** durante o teste
+   ponta a ponta, não por estimativa.
+
+### Modelos LLM do `ap-tech-team` (levantados do código no backup)
+
+Os pesos **não estão no backup** do SSD Netac — nem em `ap-tech-team/` (825 MB, só código)
+nem em qualquer outro lugar do disco; não há armazenamento do Ollama (`blobs`/`manifests`).
+Terão que ser rebaixados. A lista real, extraída do código:
+
+| Modelo | Menções |
+|---|---|
+| `ornith:9b` | 63 |
+| `gemma4:12b-it-qat` | 44 |
+| `ornith:35b` | 38 |
+| `gemma4:26b` | 35 |
+| `qwen3.6:35b-a3b-q4_K_M` | 24 |
+| `qwen3-coder:30b` | 12 |
+
+Espaço livre após copiar os modelos do estúdio: **118 GB**. O conjunto acima deve passar de
+90 GB — cabe, mas apertado.
+
+### Modelos do estúdio: recuperados do backup, não baixados
+
+Os 52 GB de `models_hub` estavam íntegros no backup pré-formatação e foram copiados
+localmente a 286 MB/s (1min27s), contra ~1h30 que faltavam pela rede. Vale como
+lembrete de procedimento: **conferir o que já existe em disco antes de baixar da internet.**
+
+
+---
+
+## 7. ComfyUI validado na GPU AMD (2026-07-26 22:0x)
+
+Subida real do ComfyUI, não teste sintético:
+
+```
+Total VRAM 16304 MB, total RAM 31892 MB
+pytorch version: 2.11.0+rocm7.13.0
+ROCm version: (7, 13)
+Device: cuda:0 AMD Radeon RX 9070 XT : native
+Starting server
+```
+
+`cuda:0` é só o nome que o PyTorch dá ao dispositivo no ROCm (a API HIP mantém a
+nomenclatura CUDA por compatibilidade) — o backend é ROCm, como as duas linhas acima
+mostram.
+
+**Os 6 custom nodes carregaram sem nenhuma falha de import**, incluindo o
+WanVideoWrapper e o comfyui_controlnet_aux, que eram os candidatos a quebrar por
+dependerem de otimizações CUDA-específicas.
+
+**Os 4 modelos Wan2.2 aparecem no `UnetLoaderGGUF`**, consultado pela API
+(`/object_info/UnetLoaderGGUF`).
+
+Detalhe que confundiu no meio do caminho: `folder_paths.get_filename_list("diffusion_models")`
+devolve **0** para os GGUF, e isso é correto — `.gguf` não é extensão aceita ali. O node
+ComfyUI-GGUF registra a chave própria `unet_gguf` reaproveitando os mesmos caminhos com
+`{".gguf"}`. Procurar no lugar errado dava a falsa impressão de que a configuração estava
+quebrada.
+
+O `extra_model_paths.yaml` em uso está versionado como
+[`build/extra_model_paths.yaml.exemplo`](build/extra_model_paths.yaml.exemplo) — o real
+fica fora do git porque carrega caminho absoluto da máquina.

@@ -1,0 +1,25 @@
+comfyui:
+     base_path: /var/home/apsrv/ap-ai-studio/ai_pipeline/models_hub/
+     is_default: true
+     checkpoints: models/checkpoints/
+     configs: models/configs/
+     loras: models/loras/
+     vae: models/vae/
+     text_encoders: |
+          models/text_encoders/
+          models/clip/
+     diffusion_models: |
+          models/unet/
+          models/diffusion_models/
+     clip_vision: models/clip_vision/
+     style_models: models/style_models/
+     embeddings: models/embeddings/
+     diffusers: models/diffusers/
+     vae_approx: models/vae_approx/
+     controlnet: |
+          models/controlnet/
+          models/t2i_adapter/
+     gligen: models/gligen/
+     upscale_models: models/upscale_models/
+     hypernetworks: models/hypernetworks/
+     frame_interpolation: models/frame_interpolation/
