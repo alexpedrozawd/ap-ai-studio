@@ -24,9 +24,22 @@ lendo. Nunca declarar algo "pronto" sem ter executado.
 - Hook `~/.claude/hooks/bloqueia-pull-arvore-suja.sh` protegendo contra `git pull` em árvore suja (com exceções para `--autostash` e `git stash && pull`)
 - Todo o trabalho até aqui está commitado e empurrado para `origin/main`
 
-### Bloqueado por decisão do usuário — NÃO decidir sozinho
-1. **Node do MusicGen** — upstream removido do GitHub, só resta fork de 10 estrelas. Sem instalar até o usuário decidir. `--mode music` fica indisponível até lá.
-2. **`tailscale0` na zona `trusted` do firewalld** — exige root/senha, que esta sessão não tem.
+### Regra do usuário (2026-07-27, antes da pausa): NUNCA parar por decisão dele
+Se durante a execução autônoma aparecer algo que só o usuário pode decidir: **não parar,
+não esperar resposta**. Anotar a decisão pendente na seção abaixo (com contexto e a
+recomendação), tomar o caminho mais seguro/reversível para continuar, e seguir
+trabalhando. Perguntar tudo de uma vez só no resumo final, quando ele voltar.
+
+### Decisões pendentes do usuário — anotar aqui, NÃO parar para perguntar
+1. **Node do MusicGen** — upstream removido do GitHub, só resta fork de 10 estrelas
+   (`ebrinz/ComfyUI-MusicGen-HF`, confirmado registrar as classes certas). Meu critério:
+   mesmo padrão que o próprio projeto já usou para recusar código não-oficial
+   (`vfx_facefusion.py`, sobre o build alternativo do onnxruntime). NÃO instalar sozinho.
+   `--mode music` fica indisponível/pulado nos testes até decisão.
+2. **`tailscale0` na zona `trusted` do firewalld** — exige root/senha, que esta sessão
+   não tem. Sem isso, quando o usuário aplicar o hardening do `security-audit`, a webui
+   ficaria inacessível via Tailscale. Fica documentado, sem ação possível daqui.
+   <!-- Novas decisões pendentes encontradas durante a execução autônoma: adicionar aqui -->
 
 ### O que FALTA testar de verdade (é o trabalho dos próximos wakeups)
 
