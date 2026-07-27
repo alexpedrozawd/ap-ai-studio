@@ -1,9 +1,6 @@
-> **Estes arquivos estão desatualizados desde 2026-07-26.** São o `pip freeze` dos
-> ambientes da era Ubuntu/NVIDIA — contêm wheels CUDA (`nvidia-*`, `torch==2.6.0+cu124`)
-> que não se aplicam ao hardware atual (Radeon RX 9070 XT/ROCm). Serão **regerados a
-> partir dos ambientes reais** ao final da reconstrução; congelar uma lista escrita à mão
-> antes disso produziria um arquivo que nunca foi validado. Ver
-> [`../MIGRACAO_BAZZITE.md`](../MIGRACAO_BAZZITE.md).
+> **Regerados em 2026-07-26** a partir dos ambientes Conda reais, já no Bazzite com
+> PyTorch ROCm (Radeon RX 9070 XT / gfx1201). Não são lista escrita à mão: saíram de
+> `pip freeze` de ambientes que sobem e rodam. Ver [`../MIGRACAO_BAZZITE.md`](../MIGRACAO_BAZZITE.md).
 
 # Dependências por ambiente Conda
 

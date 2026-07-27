@@ -4,9 +4,9 @@ name: Testes
 # testes so' rodavam quando alguem lembrava de rodar na mao.
 #
 # TRANSPARENCIA IMPORTANTE (sem inventar cobertura que nao existe): este projeto roda
-# em cima de 5 ambientes Conda pesados (torch/CUDA, GPU NVIDIA real) e de caminhos
-# absolutos deste servidor especifico (~/miniconda3/envs/..., systemd --user session).
-# Um runner generico do GitHub Actions nao tem GPU, nao tem esses ambientes Conda, e
+# em cima de 5 ambientes Conda pesados (torch/ROCm, GPU AMD Radeon RX 9070 XT real) e
+# de um contêiner distrobox deste servidor especifico (miniconda3/envs/..., systemd
+# --user session). Um runner do GitHub Actions nao tem GPU, nao tem esses ambientes, e
 # normalmente nao tem sessao systemd --user disponivel. Por isso este workflow roda o
 # que E' REALMENTE PORTAVEL (frontend inteiro, e os testes dos scripts standalone que
 # so' validam parsing de argumento) como jobs que TEM que passar, e roda o resto de

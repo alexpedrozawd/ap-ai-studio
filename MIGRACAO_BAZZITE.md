@@ -293,3 +293,79 @@ quebrada.
 O `extra_model_paths.yaml` em uso está versionado como
 [`build/extra_model_paths.yaml.exemplo`](build/extra_model_paths.yaml.exemplo) — o real
 fica fora do git porque carrega caminho absoluto da máquina.
+
+
+---
+
+## 8. Auditoria linha a linha (2026-07-26, noite)
+
+Leitura integral de `security-audit` (18 arquivos, 1.684 linhas) e de todo o código,
+configuração e documentação do `ap-ai-studio` — excluídos apenas artefatos gerados
+(`__pycache__`, `.pytest_cache`, `package-lock.json`, `node_modules`), que não são fonte.
+
+### 8.1 Bugs introduzidos por mim na migração — os mais graves
+
+| Onde | O quê | Impacto |
+|---|---|---|
+| `webui/backend/main.py` | usava `VFX_DIR` sem importar | `NameError` em toda requisição POST — **36 dos 44 testes do backend falhavam** |
+| `vfx_aliases.sh:27` | IP Tailscale do servidor antigo ainda hardcoded | `vfx-web` tentaria bind num IP inexistente |
+| `webui/backend/config.py:43` | idem | webui não subiria |
+| `vfx_aliases.sh` (`vfx-ajuda`) | `$VFX_DIR` dentro de heredoc `<<'EOF'` (aspas não expandem) | imprimia o literal |
+
+**Por que passaram:** eu rodei apenas `test_run_vfx.py` e afirmei "87/87 testes passando".
+Existem **três** suítes — faltavam `test_backend.py` (44) e `test_standalone_scripts.py` (6).
+Declarar cobertura por uma suíte quando há três é o tipo de erro que a própria auditoria
+existe para pegar.
+
+### 8.2 Lacunas que a migração não cobriu
+
+- **4 custom nodes do ComfyUI ausentes**, descobertos ao ler `vfx_workflows.py`:
+  `VHS_VideoCombine`/`VHS_LoadVideo` (VideoHelperSuite) e `HuggingFaceMusicGen`/
+  `MusicGenAudioToFile`. Sem eles os modos `video`, `music` e `upscale --realesrgan`
+  falhariam em execução, não na importação. VideoHelperSuite instalado e verificado via
+  `/object_info`. **MusicGen virou decisão do usuário** (§9).
+- **`.pre-commit-config.yaml`** apontava para `/home/ap/...` no hook do mypy — quebrado, e
+  mascarado pelo `|| true` do próprio hook.
+- **`.github/workflows/test.yml`** descrevia "torch/CUDA, GPU NVIDIA real".
+- **`StatusPage.tsx`** exibia "nvidia-smi indisponivel" ao usuário, e o card de disco dizia
+  "Disco (/)" quando a medição passou a ser do diretório do pipeline.
+- **`vfx_ffmpeg.py`** instruía `sudo apt install` — comando inexistente no host imutável.
+
+### 8.3 Duplicidade de diretório: explicada, não é erro
+
+`~/ap-ai-studio/` (78 G) contém **só dados** — `miniconda3` (26 G) e `ai_pipeline` (52 G).
+`Projetos/ap-ai-studio/` (228 M) contém **só código**, com dois symlinks para os dados.
+**Apagar o primeiro destrói os 78 GB.**
+
+Origem: o build criou o runtime ali antes de eu descobrir, lendo o `.gitignore`, que a
+arquitetura pretendida era repo == raiz. Miniconda grava caminhos absolutos nos shebangs e
+não é relocável, então a solução foi symlink em vez de mover.
+
+Os scripts de `build/` estavam de fato duplicados (editei um e copiei à mão para o outro —
+risco real de divergência). Resolvido: os do home viraram symlinks para os do repositório,
+fonte única.
+
+### 8.4 Estado dos testes após as correções
+
+| Suíte | Resultado |
+|---|---|
+| `test_run_vfx.py` | **87/87** |
+| `test_standalone_scripts.py` | **6/6** |
+| `webui/backend/test_backend.py` | **41/44** — as 3 restantes exigem `static/`, que só existe após o build do frontend |
+
+---
+
+## 9. Decisão pendente do usuário: node do MusicGen
+
+O `--mode music` depende de `HuggingFaceMusicGen`/`MusicGenAudioToFile`. O upstream
+`crashy/ComfyUI-MusicGen-HF` **foi removido do GitHub** (404); resta um fork com 10
+estrelas (`ebrinz/ComfyUI-MusicGen-HF`), cujo `node_list.json` confirma registrar
+exatamente essas classes.
+
+Não instalei por conta própria porque o projeto já estabeleceu esse critério: o
+`vfx_facefusion.py` registra ter recusado um build não-oficial do onnxruntime por
+"0 estrelas, sem manutenção, risco de segurança real". Aplicar o critério em um caso e
+ignorá-lo em outro seria incoerente.
+
+Opções: (a) instalar o fork mesmo assim; (b) deixar o `--mode music` indisponível;
+(c) procurar alternativa mantida. Sem decisão, todos os outros 8 modos funcionam.

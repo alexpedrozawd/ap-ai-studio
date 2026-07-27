@@ -24,8 +24,13 @@ WEBUI_PY="$VFX_DIR/miniconda3/envs/webui-pipeline/bin/python"
 WEBUI_DIR="$VFX_DIR/webui"
 WEBUI_BACKEND_DIR="$WEBUI_DIR/backend"
 WEBUI_FRONTEND_DIR="$WEBUI_DIR/frontend"
-WEBUI_HOST="100.122.206.41"
-WEBUI_PORT="8299"
+# Lidos de ~/.config/ap-ai-studio/webui.env (mesma fonte do servico systemd) - nunca
+# hardcoded: o repositorio e' publico e a versao anterior vazou o IP do servidor antigo.
+# Sem o arquivo, cai em localhost: seguro por padrao.
+WEBUI_ENV_FILE="$HOME/.config/ap-ai-studio/webui.env"
+[ -r "$WEBUI_ENV_FILE" ] && . "$WEBUI_ENV_FILE"
+WEBUI_HOST="${WEBUI_HOST:-127.0.0.1}"
+WEBUI_PORT="${WEBUI_PORT:-8299}"
 COMFYUI_LOG="$VFX_DIR/ai_pipeline/logs/comfyui_boot.log"
 
 # --- internos, não chamar diretamente ---
@@ -252,4 +257,7 @@ Qualquer flag extra do run_vfx.py (--dry-run, --auto-approve, --width, --fps etc
 pode ser adicionada no final de qualquer comando acima.
 Manual completo: $VFX_DIR/MANUAL_USO.md
 EOF
+	# heredoc acima e' 'EOF' entre aspas (nao expande variavel, de proposito: o texto tem
+	# muitos cifroes de exemplo). Por isso o caminho real e' impresso aqui embaixo.
+	echo "Manual completo: $VFX_DIR/MANUAL_USO.md"
 }

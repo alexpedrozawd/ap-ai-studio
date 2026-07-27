@@ -40,5 +40,10 @@ MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024  # 4GB - generoso p/ video, sem ameaca
 # cleanup_old_jobs). Jobs em memoria (JOBS) mais antigos que isso tambem sao descartados.
 JOB_RETENTION_DAYS = 7
 
-WEBUI_HOST = "100.122.206.41"  # IP Tailscale do servidor - nunca 0.0.0.0
-WEBUI_PORT = 8299
+# Endereco de escuta. NUNCA 0.0.0.0 e NUNCA hardcoded: este repositorio e' publico, e a
+# versao anterior deixou vazado o IP Tailscale do servidor antigo.
+# Vem de ~/.config/ap-ai-studio/webui.env, carregado pelo systemd (vfx-webui.service).
+# O default e' localhost - seguro por construcao: se a configuracao faltar, a interface
+# sobe acessivel so' da propria maquina, em vez de exposta na rede por engano.
+WEBUI_HOST = os.environ.get("WEBUI_HOST", "127.0.0.1")
+WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "8299"))

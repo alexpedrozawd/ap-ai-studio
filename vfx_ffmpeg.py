@@ -28,7 +28,12 @@ from vfx_workflows import build_upscale_workflow
 async def sanitize_exif(image_path: str, logger: Optional[logging.Logger] = None) -> bool:
 	if not check_binary("exiftool"):
 		if logger:
-			logger.error("exiftool nao encontrado - instale com 'sudo apt install libimage-exiftool-perl'")
+			# O pipeline roda dentro do contêiner distrobox 'ai-studio' (Ubuntu), nao no
+			# host Bazzite - que e' imutavel e nao tem apt. A instrucao aponta pra la'.
+			logger.error(
+				"exiftool nao encontrado - instale DENTRO do conteiner: "
+				"distrobox enter ai-studio -- sudo apt install -y libimage-exiftool-perl"
+			)
 		raise RuntimeError("exiftool ausente no sistema")
 	proc = await asyncio.create_subprocess_exec(
 		"exiftool", "-all=", "-overwrite_original", image_path,

@@ -65,7 +65,7 @@ def test_pipeline_path_exists_and_writable():
 
 
 def test_pipeline_path_rejects_missing_dir():
-	assert validate_pipeline_path("/home/ap/ai_pipeline_isso_nao_existe") is False
+	assert validate_pipeline_path("/caminho/que/nao/existe/ai_pipeline") is False
 
 
 def test_ffmpeg_binary_present():
@@ -563,7 +563,7 @@ def test_background_remover_and_lip_syncer_use_correct_processor_flag():
 
 	lip_cmd = build_lip_syncer_command("/tmp/audio.wav", "/tmp/video.mp4", "/tmp/output.mp4")
 	assert lip_cmd[lip_cmd.index("--processors") + 1] == "lip_syncer"
-	assert lip_cmd[lip_cmd.index("--execution-providers") + 1] == "cpu"  # achado: cuda quebra com CUBLAS failure 3
+	assert lip_cmd[lip_cmd.index("--execution-providers") + 1] == "cpu"  # sem wheel de onnxruntime com kernels pra esta GPU (ver vfx_facefusion)
 
 
 # --- Fase 3B: estrutura do workflow Wan2.2 (validação estática, sem GPU real) ---

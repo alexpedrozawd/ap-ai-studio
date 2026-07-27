@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from config import DISK_SAFETY_MARGIN_GB, MAX_UPLOAD_BYTES, WEBUI_HOST
+from config import DISK_SAFETY_MARGIN_GB, MAX_UPLOAD_BYTES, VFX_DIR, WEBUI_HOST
 from jobs import cleanup_old_jobs
 from routes_denoise import router as denoise_router
 from routes_dub import router as dub_router

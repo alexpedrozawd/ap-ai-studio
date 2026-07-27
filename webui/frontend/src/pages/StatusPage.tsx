@@ -103,7 +103,7 @@ export default function StatusPage() {
                     </p>
                   </>
                 ) : (
-                  <p className="text-muted">nvidia-smi indisponivel</p>
+                  <p className="text-muted">leitura de VRAM indisponivel</p>
                 )}
               </Card.Body>
             </Card>
@@ -112,7 +112,7 @@ export default function StatusPage() {
           <Col md={4}>
             <Card>
               <Card.Body>
-                <Card.Title>Disco (/)</Card.Title>
+                <Card.Title>Disco (pipeline)</Card.Title>
                 <ProgressBar
                   now={diskPercent}
                   label={`${diskPercent}%`}
