@@ -66,11 +66,15 @@ recomendação), tomar o caminho mais seguro/reversível para continuar, e segui
 trabalhando. Perguntar tudo de uma vez só no resumo final, quando ele voltar.
 
 ### Decisões pendentes do usuário — anotar aqui, NÃO parar para perguntar
-1. **Node do MusicGen** — upstream removido do GitHub, só resta fork de 10 estrelas
-   (`ebrinz/ComfyUI-MusicGen-HF`, confirmado registrar as classes certas). Meu critério:
-   mesmo padrão que o próprio projeto já usou para recusar código não-oficial
-   (`vfx_facefusion.py`, sobre o build alternativo do onnxruntime). NÃO instalar sozinho.
-   `--mode music` fica indisponível/pulado nos testes até decisão.
+1. ~~**Node do MusicGen**~~ — ✅ RESOLVIDO (2026-07-27, decisão do usuário). Revisão de
+   segurança feita antes de instalar: autor com 7+ anos de conta e atividade recente
+   (não é conta descartável), código lido por inteiro sem `eval`/`exec`/`subprocess`/rede
+   suspeita, sem malware. Achados não-bloqueantes: repo parado há 8 meses, sem licença,
+   1 issue aberta sem resposta (erro de dtype `float`/`BFloat16` — não reproduzido no
+   nosso teste). `MusicGenAudioToFile` está deprecada a favor de `SaveAudioStandalone`,
+   mas funciona. Instalado, `torch` ROCm reafirmado, **testado de verdade**: `--mode
+   music` gerou WAV válido (PCM16 estéreo 32kHz, 4.94s) em 3min32s. `--mode music`
+   agora funciona.
 2. **`tailscale0` na zona `trusted` do firewalld** — exige root/senha, que esta sessão
    não tem. Sem isso, quando o usuário aplicar o hardening do `security-audit`, a webui
    ficaria inacessível via Tailscale. Fica documentado, sem ação possível daqui.
