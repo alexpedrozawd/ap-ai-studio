@@ -4,6 +4,11 @@ Documento de resgate para os wakeups encadeados. Se o contexto da conversa for
 comprimido ou perdido entre um wakeup e outro, **este arquivo é a fonte da verdade**
 sobre o que já foi feito e o que falta. Leia-o inteiro antes de agir.
 
+## Teste do mecanismo de wakeup
+
+- Agendado às ~00:38:10, disparou às **2026-07-27 00:40:04 -03** (delay pedido: 60s).
+  Mecanismo confirmado funcional. A cadeia real de ~4h foi configurada em seguida.
+
 ## Regra de ouro desta sessão (gravada no CLAUDE.md global)
 
 Antes de qualquer trabalho: agir como full stack sênior + arquiteto sênior + QA sênior
