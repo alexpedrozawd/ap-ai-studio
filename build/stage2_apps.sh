@@ -119,7 +119,15 @@ criar_env tts-pipeline 3.11
 TTS_PY="$MINICONDA_DIR/envs/tts-pipeline/bin/python"
 log "Instalando coqui-tts + torch ROCm no tts-pipeline..."
 "$TTS_PY" -m pip install -q --index-url "$ROCM_INDEX" torch torchaudio || falhou "torch ROCm (tts)"
-"$TTS_PY" -m pip install -q coqui-tts || falhou "coqui-tts"
+# ACHADO REAL (2026-07-27, testado ao vivo): 'pip install coqui-tts' sem fixar versao
+# puxa transformers 5.x, que remove 'isin_mps_friendly' de transformers.pytorch_utils -
+# o coqui-tts (camada tortoise/autoregressive) ainda importa essa funcao, e o TTS.api
+# nem importa (ImportError na primeira linha). O proprio PROMPT_MASTER ja documentava
+# a exigencia de transformers==4.57.6 exato - o pip install generico nao a respeitava.
+"$TTS_PY" -m pip install -q coqui-tts "transformers==4.57.6" || falhou "coqui-tts"
+# torch >=2.9 exige torchcodec para I/O de audio (TTS.__init__ falha na importacao sem
+# ele) - achado tambem so' visivel executando de verdade, nao lendo o requirements.txt.
+"$TTS_PY" -m pip install -q torchcodec || falhou "torchcodec (tts)"
 
 # --- 2.5 Demucs (isolamento de voz) ---
 criar_env noise-pipeline 3.11
@@ -127,6 +135,14 @@ NOISE_PY="$MINICONDA_DIR/envs/noise-pipeline/bin/python"
 log "Instalando demucs + torch ROCm no noise-pipeline..."
 "$NOISE_PY" -m pip install -q --index-url "$ROCM_INDEX" torch torchaudio || falhou "torch ROCm (demucs)"
 "$NOISE_PY" -m pip install -q demucs torchcodec || falhou "demucs"
+# ACHADO REAL (2026-07-27, testado ao vivo): o pacote 'demucs' do PyPI importa numpy
+# direto (demucs/transformer.py) mas NAO o declara como dependencia nos seus metadados
+# (pip show demucs -> Requires: einops, huggingface-hub, julius, lameenc, pyyaml,
+# safetensors, sphn, torch, tqdm - sem numpy). Sem essa instalacao explicita,
+# 'from demucs.separate import main' falha com ModuleNotFoundError na primeira
+# execucao real - nao aparece so lendo o codigo nem os requirements gerados por
+# 'pip freeze' de um ambiente que nunca foi de fato exercitado.
+"$NOISE_PY" -m pip install -q numpy || falhou "numpy (demucs, dependencia nao declarada pelo pacote)"
 
 # --- 2.6 Interface web ---
 criar_env webui-pipeline 3.11

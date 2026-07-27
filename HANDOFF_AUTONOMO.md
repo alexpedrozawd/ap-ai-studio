@@ -51,13 +51,13 @@ trabalhando. Perguntar tudo de uma vez só no resumo final, quando ele voltar.
 Nenhum destes modos foi executado de ponta a ponta ainda. Testar cada um é o que resta
 para "tudo estar pronto":
 
-- [ ] **faceswap** (`--mode faceswap`) — FaceFusion nunca rodou de fato nesta migração, só o ambiente foi criado. Usar assets de exemplo oficiais do próprio FaceFusion (`facefusion/facefusion-assets` no GitHub — já usado como precedente no `PROMPT_MASTER.md`, não são fotos de pessoas reais). NÃO usar fotos reais de pessoas por privacidade.
+- [x] **faceswap** — ✅ SUCESSO (2026-07-27 01:54, 11min26s em CPU). Assets oficiais do FaceFusion (`releases/download/examples-3.0.0/source.jpg` + `target-240p.mp4`, confirmados via URL do próprio `tests/test_cli_face_swapper.py` do FaceFusion). Output h264 426x226 10.8s, frame extraído e inspecionado visualmente — rosto coerente, sem artefato.
 - [ ] **inpaint** (`--mode inpaint`) — SDXL, ComfyUI. Testar com e sem `--use-depth-controlnet`.
 - [ ] **removebg** (`--mode removebg`) — FaceFusion background_remover.
-- [ ] **tts** (`--mode tts`) — XTTS-v2, ambiente `tts-pipeline`. Nunca invocado.
+- [x] **tts** — ✅ SUCESSO após corrigir bug real (2026-07-27 01:54). BUG: `pip install coqui-tts` sem fixar versão puxou `transformers==5.14.1`, que remove `isin_mps_friendly` de `transformers.pytorch_utils` — `ImportError` na primeira linha, o próprio `PROMPT_MASTER.md` já documentava a exigência de `transformers==4.57.6` exato mas o script de build não fixava. Também faltava `torchcodec` (torch>=2.9 exige p/ I/O de áudio). Corrigido: `stage2_apps.sh` fixa a versão + instala torchcodec; `requirements/tts-pipeline.txt` regenerado do ambiente são. Teste real: WAV 24kHz mono 5.43s, voz embutida "Claribel Dervla", 6min55s (inclui download do modelo ~1.4GB na primeira execução).
 - [ ] **dublagem** (`vfx-dublar` / lip_syncer via FaceFusion direto) — CPU, decisão já tomada.
 - [ ] **denoise** (`--mode denoise`) — Demucs, ambiente `noise-pipeline`. Nunca invocado.
-- [ ] **upscale --upscale-method lanczos** — ffmpeg puro, deveria ser trivial.
+- [x] **upscale --upscale-method lanczos** — ✅ SUCESSO (2026-07-27 01:46). 1024x1024 → 4096x4096 confirmado via ffprobe, 0,3s. Gates passaram normalmente.
 - [ ] **upscale --upscale-method realesrgan** — ComfyUI/GPU.
 - [ ] **master** (`--mode master`) — remuxagem ffmpeg/VAAPI. JÁ testado indiretamente pelo render de vídeo (o modo video não passa por master, então isto ainda não foi validado isoladamente).
 - [ ] **Comparar VAAPI vs libx264** de verdade num output de master (ver `vfx_ffmpeg.py` — `video_codec="libx264"` como alternativa).
