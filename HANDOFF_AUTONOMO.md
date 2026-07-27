@@ -1,5 +1,35 @@
 # Handoff para continuação autônoma — 2026-07-27
 
+## ✅ RESUMO FINAL (elo 2, encerrado 03:20 — todos os itens concluídos, cadeia parada)
+
+Todos os 9 modos do `run_vfx.py` testados de verdade (exceto `music`, bloqueado por
+decisão do usuário) + a webui testada ponta a ponta pela API HTTP real. **137/137**
+testes automatizados passando. **9 commits** nesta cadeia de wakeups, todos no
+`origin/main`.
+
+**Bugs reais corrigidos (6):** `transformers`/`torchcodec` no `tts-pipeline`; `numpy`
+ausente no `noise-pipeline` (lacuna do próprio pacote `demucs`); 3 exemplos de
+`removebg` no `MANUAL_USO.md` ensinando um padrão que sempre falharia; 44 caminhos
+obsoletos no mesmo arquivo.
+
+**Achados registrados, não "corrigidos" (porque não são bugs de código):**
+- Crash real de GPU (page fault de hardware, `amdgpu`/ROCm) no primeiro `inpaint` após
+  um `video` longo — autorrecuperável, mas primeira tentativa do usuário falharia.
+- OOM real e confirmado em 720x720/161 frames (o teto permitido) — o default real
+  (320x320) funciona com folga (8,91GB de pico, de 15,92GB totais).
+- `VRAM_PEAK_ALERT_GB` mantido em 15 de propósito — baixar quebraria o alerta
+  justamente no caso que genuinamente falha; a correção certa é o Gate 2 escalar o
+  limiar pela resolução/frames pedidos, não uma constante única (feature nova, fora
+  do escopo desta sessão de teste).
+- Lacuna de usabilidade: `libx264` como alternativa ao VAAPI existe no código mas não é
+  alcançável nem pelo CLI nem pela webui.
+
+**Decisões que ficaram para o usuário (não bloquearam o trabalho):**
+1. Node do MusicGen (upstream removido do GitHub, só resta fork de 10★).
+2. `tailscale0` na zona `trusted` (exige root que esta sessão não tem).
+
+**Sem mais itens pendentes.** Cadeia de wakeups encerrada aqui — não reagendada.
+
 Documento de resgate para os wakeups encadeados. Se o contexto da conversa for
 comprimido ou perdido entre um wakeup e outro, **este arquivo é a fonte da verdade**
 sobre o que já foi feito e o que falta. Leia-o inteiro antes de agir.
@@ -78,18 +108,14 @@ para "tudo estar pronto":
   - **720x720 (máximo permitido por `MAX_VIDEO_WIDTH/HEIGHT`) + 161 frames (default de `--num-frames`): OOM CONFIRMADO** (2026-07-27 02:10, 21s até falhar). Erro real do PyTorch/ROCm: `CUDA out of memory. Tried to allocate 3.17 GiB. GPU 0 has a total capacity of 15.92 GiB of which 3.22 GiB is free. Of the allocated memory 12.02 GiB is allocated by PyTorch`. Falhou no `WanVideoSampler` (segundo/low-noise sampler). Isso é exatamente o risco que o próprio `vfx_config.py` já documentava por escrito (`MAX_VIDEO_FRAMES = 241 # ... ainda NAO testado nessa escala`) — agora confirmado ao vivo: **161 frames em 720x720 não cabe nos 16GB desta GPU com `--blocks-to-swap` no padrão (20)**.
   - **IMPORTANTE — isto NÃO é o default real que a webui oferece.** A `VideoPage.tsx` tem placeholder 320x320/161 frames, não 720x720 (720 é só o teto permitido, não o valor padrão).
   - **Confirmado que não é confusão com a outra sessão paralela do usuário:** o Gate 2 já descarrega o Ollama automaticamente antes de cada render (`ollama stop qwen`, log confirmado) — o `ollama serve` está rodando há 1h45min (provavelmente da sessão paralela no `ap-tech-team`), mas o modelo é descarregado antes de cada job nosso. O OOM em 720x720 aconteceu com 12,8GB genuinamente livres no início — é footprint real do Wan2.2 nessa config, não contenção entre sessões. Boa notícia: a arquitetura já lida corretamente com o multitarefa real entre projetos.
-  - 🔄 **EM ANDAMENTO no momento da pausa (02:13):** teste com 320x320/161 frames (default real), unidade `ai-studio-render-default`, iniciado 02:11:30. Monitor de VRAM em paralelo: `ai-studio-vram-default` (grava pico em `/tmp/claude-1000/vram_pico_default`).
-    **PRÓXIMO WAKEUP: checar isto PRIMEIRO, antes de qualquer outra coisa:**
-    ```bash
-    systemctl --user is-active ai-studio-render-default
-    journalctl --user -u ai-studio-render-default --no-pager | grep -oP '(?<=\]: ).*' | tail -20
-    cat /tmp/claude-1000/vram_pico_default 2>/dev/null | awk '{printf "%.2f GiB\n", $1/1073741824}'
-    ls -la /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/tmp/test_assets/output_render_default.mp4
-    ```
-    Se ainda `active`: esperar terminar (`until ! systemctl --user is-active --quiet ai-studio-render-default; do sleep 20; done`) antes de seguir. Depois: `systemctl --user stop ai-studio-vram-default` pra parar o monitor.
-  - `VRAM_PEAK_ALERT_GB` **NÃO foi recalibrado ainda** — depende do resultado do teste em andamento. Se 320x320/161 funcionar, recalibrar com o pico medido. Se TAMBÉM der OOM, é achado ainda mais grave (o default real quebra) — investigar `--blocks-to-swap` mais alto como mitigação antes de qualquer outra coisa.
-- [ ] Rodar `pytest` de novo depois de qualquer mudança de código.
-- [ ] Se qualquer modo falhar: **investigar a causa raiz, corrigir, documentar em `MIGRACAO_BAZZITE.md`, e SÓ DEPOIS seguir** para o próximo modo. Não pular falha para "ver o resto".
+  - ✅ **320x720/161 frames (default real da webui): SUCESSO** (2026-07-27 02:20:19, 8min49s). Vídeo válido: h264 1280x1280 (upscale 4x automático), 30fps, 10.7s. **Pico de VRAM medido: 8,91 GiB** — atingido cedo (90s após o início, 02:13:01) e nunca mais superado no resto do render nem depois (monitor rodou até 02:41, sem novas atualizações). Sem confusão com a sessão paralela (Ollama sem modelo carregado no momento da medição).
+  - **Decisão sobre `VRAM_PEAK_ALERT_GB` (permanece 15, NÃO alterado) — raciocínio explícito:**
+    Dois pontos de dado reais agora: 320x320/161 frames pico em **8,91 GiB total** (usados de 15,92GB, ~7GB livres no pico); 720x720/161 frames **estourou tentando alocar além de 15,19GB** (12,02GB já alocados + 3,17GB pedidos, sem couber nem com 12,8GB livres no início — ou seja, o card **inteiro** não bastou).
+    Simplesmente baixar o limiar pra ~9-10GB (eliminando o "ruído" do caso pequeno) **silenciaria o alerta exatamente no caso que genuinamente falha** (720x720) — regressão de segurança, não simplificação. O alerta hoje é ruidoso pro caso comum (320x320) mas está corretamente calibrado pro pior caso permitido pelo código (`MAX_VIDEO_WIDTH/HEIGHT=720`). A correção de verdade seria o Gate 2 calcular o limiar **em função de largura×altura×frames pedidos**, não uma constante única — isso é escopo de feature nova (não é "recalibrar um número"), fora do que uma sessão de teste/auditoria deveria decidir sozinha. Documentado como recomendação, constante não tocada.
+    Nota lateral: o alerta é **consultivo, não bloqueante** — só força confirmação [Y/n] fora de `--auto-approve`; a webui sempre usa `--auto-approve`, então usuários da webui nunca veem esse prompt. O custo real do "ruído" é mínimo (fricção de CLI interativo), o que reforça não vale o risco de mexer.
+- [x] Rodar `pytest` de novo — ✅ 137/137 (93 backend/orquestrador + 44 webui) confirmado no elo 2 (03:16), depois de todas as correções e testes reais.
+- [x] Regra de processo "investigar causa raiz antes de seguir" — seguida em todos os achados deste handoff (3 bugs de ambiente + 1 lacuna de doc + 1 lacuna de usabilidade + 1 crash de GPU, todos com causa raiz confirmada, não só contornados).
+- [x] **Extra (achado no elo 2): teste ponta a ponta pela API HTTP real da webui** — nenhum teste anterior tinha submetido um job de verdade (não `--dry-run`, não mockado) pelo caminho que o navegador de fato usa. Feito: `POST /api/jobs/upscale` com upload multipart real → polling de `GET /api/jobs/{id}` → `GET /api/jobs/{id}/output` → JPEG 4096x4096 baixado e validado. Fecha o único elo da cadeia (frontend→API→subprocess→run_vfx→ComfyUI) que só tinha sido testado com mocks/CLI direto até aqui. Artefatos de teste limpos do servidor depois.
 
 ### Como testar cada modo (padrão usado no render de vídeo que já funcionou)
 
