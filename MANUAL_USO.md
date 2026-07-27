@@ -130,7 +130,7 @@ navegador (ver abaixo), ou pra diagnosticar um problema:
 
 ```bash
 conda activate vfx-pipeline
-cd /var/home/apsrv/ap-ai-studio/ai_pipeline/ComfyUI
+cd /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/ComfyUI
 python main.py --port 8288 --listen 127.0.0.1
 ```
 
@@ -194,7 +194,7 @@ sem executar nada.
 - `--auto-approve`: responde "sim" automaticamente aos Gates 1 e 2 (não ao Gate 3). A
   decisão continua sendo gravada no log mesmo assim.
 
-Tudo fica registrado em `/var/home/apsrv/ap-ai-studio/ai_pipeline/logs/run_vfx.log` — se algo der errado numa
+Tudo fica registrado em `/var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/logs/run_vfx.log` — se algo der errado numa
 execução que você deixou rodando sem acompanhar, é ali que você vai olhar depois.
 
 ---
@@ -212,9 +212,9 @@ um personagem numa imagem/frame parado.
 
 ```bash
 python run_vfx.py --mode faceswap \
-  --source /var/home/apsrv/ap-ai-studio/fotos/rosto_do_filho.jpg \
-  --target /var/home/apsrv/ap-ai-studio/cenas/frame_do_heroi.jpg \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/resultado_faceswap.jpg
+  --source /var/home/apsrv/Projetos/ap-ai-studio/fotos/rosto_do_filho.jpg \
+  --target /var/home/apsrv/Projetos/ap-ai-studio/cenas/frame_do_heroi.jpg \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/resultado_faceswap.jpg
 ```
 
 - `--source`: a **foto da pessoa real** cujo rosto vai ser inserido (quanto mais nítida e
@@ -231,9 +231,9 @@ Mesmo comando, só que `--target` é um arquivo de vídeo em vez de imagem:
 
 ```bash
 python run_vfx.py --mode faceswap \
-  --source /var/home/apsrv/ap-ai-studio/fotos/rosto_do_filho.jpg \
-  --target /var/home/apsrv/ap-ai-studio/cenas/cena_do_filme.mp4 \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/resultado_faceswap.mp4
+  --source /var/home/apsrv/Projetos/ap-ai-studio/fotos/rosto_do_filho.jpg \
+  --target /var/home/apsrv/Projetos/ap-ai-studio/cenas/cena_do_filme.mp4 \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/resultado_faceswap.mp4
 ```
 
 ### 4.3 Trocar o rosto em um vídeo **longo** (cena inteira de um filme)
@@ -243,9 +243,9 @@ de N segundos, processa cada um, e junta tudo de volta no final automaticamente.
 
 ```bash
 python run_vfx.py --mode faceswap \
-  --source /var/home/apsrv/ap-ai-studio/fotos/rosto_do_filho.jpg \
-  --target /var/home/apsrv/ap-ai-studio/cenas/cena_longa.mp4 \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/resultado_final.mp4 \
+  --source /var/home/apsrv/Projetos/ap-ai-studio/fotos/rosto_do_filho.jpg \
+  --target /var/home/apsrv/Projetos/ap-ai-studio/cenas/cena_longa.mp4 \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/resultado_final.mp4 \
   --chunk-seconds 30
 ```
 
@@ -302,7 +302,7 @@ de criar do zero, o modelo anima a partir dessa imagem, seguindo o que o prompt 
 
 ```bash
 python run_vfx.py --mode video \
-  --source-image /var/home/apsrv/ap-ai-studio/fotos/foto_de_familia.jpg \
+  --source-image /var/home/apsrv/Projetos/ap-ai-studio/fotos/foto_de_familia.jpg \
   --prompt "a pessoa vira lentamente a cabeça para olhar de lado e sorri" \
   --width 480 --height 480 --num-frames 161
 ```
@@ -325,10 +325,10 @@ servem).
 
 ```bash
 python run_vfx.py --mode inpaint \
-  --source-image /var/home/apsrv/ap-ai-studio/fotos/foto_original.jpg \
-  --mask-image /var/home/apsrv/ap-ai-studio/fotos/mascara.png \
+  --source-image /var/home/apsrv/Projetos/ap-ai-studio/fotos/foto_original.jpg \
+  --mask-image /var/home/apsrv/Projetos/ap-ai-studio/fotos/mascara.png \
   --prompt "fundo de floresta com árvores verdes, iluminação natural" \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/foto_editada.jpg
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/foto_editada.jpg
 ```
 
 **Importante:** sempre use `--prompt` descrevendo o que deve aparecer na área apagada. Sem
@@ -345,10 +345,10 @@ de 0 a 1) pra ajustar o quanto o resultado deve seguir a profundidade original:
 
 ```bash
 python run_vfx.py --mode inpaint \
-  --source-image /var/home/apsrv/ap-ai-studio/fotos/foto_original.jpg \
-  --mask-image /var/home/apsrv/ap-ai-studio/fotos/mascara.png \
+  --source-image /var/home/apsrv/Projetos/ap-ai-studio/fotos/foto_original.jpg \
+  --mask-image /var/home/apsrv/Projetos/ap-ai-studio/fotos/mascara.png \
   --prompt "céu azul com nuvens" \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/foto_editada.jpg \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/foto_editada.jpg \
   --use-depth-controlnet --controlnet-strength 0.6
 ```
 
@@ -364,11 +364,18 @@ real de um teste com ControlNet que mostrou uma linha de costura na borda da edi
 
 ```bash
 python run_vfx.py --mode removebg \
-  --target /var/home/apsrv/ap-ai-studio/fotos/foto_com_fundo.jpg \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/foto_sem_fundo.png
+  --target /var/home/apsrv/Projetos/ap-ai-studio/fotos/foto_com_fundo.jpg \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/foto_sem_fundo.jpg
 ```
 
 Não precisa do ComfyUI ligado — usa o FaceFusion.
+
+**A extensão de saída precisa ser IDÊNTICA à de entrada** (regra do próprio FaceFusion,
+vale para todos os processadores dele, não só remover fundo) — `.jpg` de entrada exige
+`.jpg` de saída, `.png` exige `.png`. Se quiser transparência de verdade no resultado
+(fundo realmente vazio, não só branco), a foto de entrada também precisa já estar em
+`.png`. Achado real, testado ao vivo: `--target foto.jpg --output foto.png` falha com
+"match the target and output extension!".
 
 ### 4.8 Clonar uma voz / gerar fala (texto → voz)
 
@@ -381,7 +388,7 @@ python run_vfx.py --mode tts \
   --text "Olá, esse é um teste de voz gerada por inteligência artificial." \
   --speaker "Ana Florence" \
   --language pt \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/fala_gerada.wav
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/fala_gerada.wav
 ```
 
 **(b) Clonar uma voz específica**, a partir de uma amostra de áudio curta (ex.: um áudio
@@ -392,7 +399,7 @@ python run_vfx.py --mode tts \
   --text "Texto que a voz clonada vai falar." \
   --speaker-wav /var/home/apsrv/audios/amostra_da_voz.wav \
   --language pt \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/fala_clonada.wav
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/fala_clonada.wav
 ```
 
 Use **ou** `--speaker` **ou** `--speaker-wav` (um dos dois é obrigatório, não os dois).
@@ -415,7 +422,7 @@ existe são duas peças que funcionam, mas que você precisa encadear manualment
 python run_vfx.py --mode tts \
   --text "Nova fala que vai substituir o áudio original do vídeo." \
   --speaker-wav /var/home/apsrv/audios/amostra_da_voz.wav \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/fala_nova.wav
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/fala_nova.wav
 ```
 
 **Passo 2 — sincronizar a boca do vídeo com esse áudio**, chamando o FaceFusion
@@ -425,12 +432,12 @@ remoto"):
 ```bash
 conda deactivate  # sai do vfx-pipeline
 conda activate facefusion-pipeline
-cd /var/home/apsrv/ap-ai-studio/ai_pipeline/facefusion
+cd /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/facefusion
 python facefusion.py headless-run \
   --processors lip_syncer \
-  -s /var/home/apsrv/ap-ai-studio/ai_pipeline/fala_nova.wav \
-  -t /var/home/apsrv/ap-ai-studio/cenas/video_original.mp4 \
-  -o /var/home/apsrv/ap-ai-studio/ai_pipeline/video_dublado.mp4 \
+  -s /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/fala_nova.wav \
+  -t /var/home/apsrv/Projetos/ap-ai-studio/cenas/video_original.mp4 \
+  -o /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/video_dublado.mp4 \
   --execution-providers cpu
 ```
 
@@ -453,8 +460,8 @@ Separa a voz do resto (música, ruído, barulho de fundo) usando o Demucs.
 ```bash
 python run_vfx.py --mode denoise \
   --target /var/home/apsrv/audios/audio_com_ruido.wav \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/voz_isolada.wav \
-  --output-instrumental /var/home/apsrv/ap-ai-studio/ai_pipeline/resto_do_audio.wav
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/voz_isolada.wav \
+  --output-instrumental /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/resto_do_audio.wav
 ```
 
 `--output-instrumental` é opcional — só use se também quiser guardar o que **não** é voz
@@ -474,7 +481,7 @@ Não precisa ligar o ComfyUI manualmente antes — este modo já liga/religa ele
 python run_vfx.py --mode music \
   --prompt "trilha orquestral épica, tema de aventura, tom heroico" \
   --music-duration 15 \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/musica_gerada.wav
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/musica_gerada.wav
 ```
 
 ### 4.12 Masterização final (juntar o vídeo processado com o áudio/legendas originais)
@@ -487,9 +494,9 @@ transmissão (bt709).
 
 ```bash
 python run_vfx.py --mode master \
-  --original /var/home/apsrv/ap-ai-studio/cenas/cena_original.mp4 \
-  --processed-video /var/home/apsrv/ap-ai-studio/ai_pipeline/resultado_faceswap.mp4 \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/video_final_pronto.mp4 \
+  --original /var/home/apsrv/Projetos/ap-ai-studio/cenas/cena_original.mp4 \
+  --processed-video /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/resultado_faceswap.mp4 \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/video_final_pronto.mp4 \
   --fps 24
 ```
 
@@ -507,8 +514,8 @@ para restaurar fotos antigas sem precisar recriar a cena do zero.
 
 ```bash
 python run_vfx.py --mode upscale \
-  --target /var/home/apsrv/ap-ai-studio/fotos/foto_antiga.jpg \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/foto_antiga_4x.jpg
+  --target /var/home/apsrv/Projetos/ap-ai-studio/fotos/foto_antiga.jpg \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/foto_antiga_4x.jpg
 ```
 
 Para vídeo, o comando é o mesmo (o sistema detecta automaticamente pela extensão do
@@ -518,7 +525,7 @@ não é detectado automaticamente do vídeo original):
 ```bash
 python run_vfx.py --mode upscale \
   --target /var/home/apsrv/videos/cena_curta.mp4 \
-  --output /var/home/apsrv/ap-ai-studio/ai_pipeline/cena_curta_4x.mp4 \
+  --output /var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/cena_curta_4x.mp4 \
   --fps 24
 ```
 
@@ -562,7 +569,7 @@ frequência esperada:
 
 | Sintoma | Causa provável | O que fazer |
 |---|---|---|
-| Gate 3 aborta sozinho, sem perguntar | Menos de 30GB livres em `/` | `df -h /`, apague renders antigos de `/var/home/apsrv/ap-ai-studio/ai_pipeline` que não precisa mais |
+| Gate 3 aborta sozinho, sem perguntar | Menos de 30GB livres em `/` | `df -h /`, apague renders antigos de `/var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline` que não precisa mais |
 | Gate 2 avisa VRAM baixa | O Ollama (Qwen) está com um modelo carregado na GPU | Descarregue o modelo (`ollama stop <modelo>`) antes de renders pesados |
 | `EOFError` ao responder um Gate | Você chamou com `conda run -n ...` em vez de `conda activate` | Use `conda activate vfx-pipeline && python run_vfx.py ...` |
 | `--mode inpaint`/`music`/`upscale`/`video` trava esperando o ComfyUI ficar pronto | Raro — esses 4 modos já ligam/religam o ComfyUI sozinhos (seção 2.2); só falha se `systemd-run` estiver indisponível ou a porta 8288 travada por outro processo | Confirme com `curl -s http://127.0.0.1:8288/system_stats`; se não responder, veja o log em `logs/comfyui_video_mode.log` |
@@ -586,7 +593,7 @@ cd /var/home/apsrv/ap-ai-studio
 | Gerar vídeo do zero (texto) | `python run_vfx.py --mode video --prompt "..." --width 480 --height 480 --num-frames 161` |
 | Animar uma foto | ...acima + `--source-image F.jpg` |
 | Editar/apagar algo de uma foto | `python run_vfx.py --mode inpaint --source-image F.jpg --mask-image M.png --prompt "..." --output O.jpg` (liga o ComfyUI sozinho se precisar) |
-| Remover fundo | `python run_vfx.py --mode removebg --target F.jpg --output O.png` |
+| Remover fundo | `python run_vfx.py --mode removebg --target F.jpg --output O.jpg` (extensão de saída IGUAL à de entrada — exigência do FaceFusion) |
 | Gerar fala / clonar voz | `python run_vfx.py --mode tts --text "..." --speaker-wav V.wav --output O.wav` |
 | Dublar vídeo (2 passos) | TTS (acima) + FaceFusion `headless-run --processors lip_syncer` manual (seção 4.9) |
 | Isolar voz / remover ruído | `python run_vfx.py --mode denoise --target A.wav --output O.wav` |
@@ -600,12 +607,12 @@ cd /var/home/apsrv/ap-ai-studio
 
 ## 8. Onde tudo fica guardado no servidor
 
-- **Código do pipeline:** `/var/home/apsrv/ap-ai-studio/` (este repositório).
-- **Modelos de IA baixados, saídas do ComfyUI, logs:** `/var/home/apsrv/ap-ai-studio/ai_pipeline/` — inclui
+- **Código do pipeline:** `/var/home/apsrv/Projetos/ap-ai-studio/` (este repositório).
+- **Modelos de IA baixados, saídas do ComfyUI, logs:** `/var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/` — inclui
   `ComfyUI/output/` (resultado de vídeo/imagem/música gerados pelo ComfyUI) e `logs/`
   (`run_vfx.log` é o log central de tudo que passa pelo orquestrador).
-- **FaceFusion:** `/var/home/apsrv/ap-ai-studio/ai_pipeline/facefusion/`.
-- **Log de decisões dos Gates e erros:** `/var/home/apsrv/ap-ai-studio/ai_pipeline/logs/run_vfx.log` — sempre
+- **FaceFusion:** `/var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/facefusion/`.
+- **Log de decisões dos Gates e erros:** `/var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/logs/run_vfx.log` — sempre
   olhe aqui primeiro se algo rodou sem você acompanhar (ex.: um render longo deixado em
   segundo plano) e você quer saber o que aconteceu.
 
@@ -642,7 +649,7 @@ segurança de 30GB do Gate 3 é levada a sério — evite deixar o disco chegar 
 
 Em vez de digitar `python run_vfx.py --mode faceswap --source ... --target ... --output
 ...` toda vez, existem comandos curtos definidos em
-`/var/home/apsrv/ap-ai-studio/vfx_aliases.sh` e carregados automaticamente em todo terminal novo
+`/var/home/apsrv/Projetos/ap-ai-studio/vfx_aliases.sh` e carregados automaticamente em todo terminal novo
 (via uma linha adicionada ao seu `~/.bashrc`). Eles chamam o Python certo pelo caminho
 completo por baixo dos panos — funcionam **em qualquer terminal**, mesmo que você não
 tenha ativado nenhum ambiente Conda antes.
@@ -661,7 +668,7 @@ final do comando, exatamente como no comando completo.
 | `vfx-video` | `--mode video`, texto→vídeo (seção 4.4) | `vfx-video "um dragão azul voando"` |
 | `vfx-anima` | `--mode video --source-image`, imagem→vídeo (seção 4.5) | `vfx-anima foto.jpg "vira a cabeça e sorri"` |
 | `vfx-editar` | `--mode inpaint` (seção 4.6) | `vfx-editar foto.jpg mascara.png saida.jpg --prompt "fundo verde"` |
-| `vfx-semfundo` | `--mode removebg` (seção 4.7) | `vfx-semfundo foto.jpg saida.png` |
+| `vfx-semfundo` | `--mode removebg` (seção 4.7) | `vfx-semfundo foto.jpg saida.jpg` (mesma extensão do original) |
 | `vfx-fala` | `--mode tts --speaker` (seção 4.8a) | `vfx-fala "texto" "Ana Florence" saida.wav` |
 | `vfx-clonar` | `--mode tts --speaker-wav` (seção 4.8b) | `vfx-clonar "texto" amostra.wav saida.wav` |
 | `vfx-dublar` | FaceFusion `lip_syncer` manual (seção 4.9) | `vfx-dublar fala_nova.wav video.mp4 saida.mp4` |
@@ -788,8 +795,8 @@ Troubleshooting do `README.md`).
 
 ### Onde ficam os arquivos
 
-Uploads e resultados da interface web ficam em `/var/home/apsrv/ap-ai-studio/ai_pipeline/webui_uploads/` e
-`/var/home/apsrv/ap-ai-studio/ai_pipeline/webui_jobs/` (uma pasta por job), separados dos arquivos que você
+Uploads e resultados da interface web ficam em `/var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/webui_uploads/` e
+`/var/home/apsrv/Projetos/ap-ai-studio/ai_pipeline/webui_jobs/` (uma pasta por job), separados dos arquivos que você
 gera direto pelo terminal — não se misturam. Pastas de job com mais de 7 dias são
 apagadas automaticamente (junto com o registro do job na memória da interface, que
 também não é mantido pra sempre) — se quiser guardar algum resultado por mais tempo,
