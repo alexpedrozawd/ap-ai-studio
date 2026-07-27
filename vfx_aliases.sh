@@ -10,7 +10,9 @@
 # Tudo que vier depois dos argumentos obrigatorios é repassado direto pro
 # run_vfx.py - ex: vfx-rosto origem.jpg alvo.mp4 saida.mp4 --chunk-seconds 30
 
-VFX_DIR="${AP_AI_STUDIO_HOME:-/var/home/apsrv/ap-ai-studio}"
+# Auto-localizavel: a raiz e' o diretorio deste script, entao o repositorio funciona
+# clonado em qualquer lugar. AP_AI_STUDIO_HOME sobrescreve se precisar.
+VFX_DIR="${AP_AI_STUDIO_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 VFX_PY="$VFX_DIR/miniconda3/envs/vfx-pipeline/bin/python"
 VFX_SCRIPT="$VFX_DIR/run_vfx.py"
 FF_PY="$VFX_DIR/miniconda3/envs/facefusion-pipeline/bin/python"

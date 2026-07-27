@@ -32,13 +32,35 @@ criar_env() {  # nome, versao_python
 }
 
 clonar() {  # url, destino
-	local url="$1" destino="$2"
+	local url="$1" destino="$2" nome
+	nome=$(basename "$destino")
 	if [ -d "$destino/.git" ]; then
-		log "$(basename "$destino") ja clonado."
+		log "$nome ja clonado."
 		return 0
 	fi
-	log "Clonando $(basename "$destino")..."
-	git clone --depth 1 "$url" "$destino" || { falhou "clonar $(basename "$destino")"; return 1; }
+	log "Clonando $nome..."
+	# ACHADO REAL (2026-07-26): 'git clone' recusa destino nao-vazio, e o diretorio
+	# ai_pipeline/ComfyUI ja existia (criado como efeito colateral da suite de testes,
+	# que faz os.makedirs em PIPELINE_PATH). O clone falhou, o build seguiu, e os custom
+	# nodes foram instalados dentro de um ComfyUI que nao existia - so' detectado depois.
+	# Por isso: se o destino existe mas nao e' repo, clona num temporario e preenche o que
+	# falta, sem sobrescrever (-n) o que ja estiver la'.
+	if [ -d "$destino" ] && [ -n "$(ls -A "$destino" 2>/dev/null)" ]; then
+		log "  destino nao-vazio e sem .git - clonando via temporario e preenchendo lacunas"
+		local tmp
+		tmp=$(mktemp -d)
+		if git clone --depth 1 "$url" "$tmp/repo"; then
+			cp -rn "$tmp/repo/.git" "$destino/" 2>/dev/null
+			cp -rn "$tmp/repo/." "$destino/" 2>/dev/null
+			rm -rf "$tmp"
+			log "  $nome preenchido."
+			return 0
+		fi
+		rm -rf "$tmp"
+		falhou "clonar $nome (via temporario)"
+		return 1
+	fi
+	git clone --depth 1 "$url" "$destino" || { falhou "clonar $nome"; return 1; }
 }
 
 # --- 2.1 ComfyUI ---

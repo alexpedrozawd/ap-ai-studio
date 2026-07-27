@@ -8,9 +8,11 @@ __pycache__/
 webui/backend/static/
 node_modules/
 
-# dados/instalacoes pesadas relocadas para dentro do projeto (ver simlinks em ~/ai_pipeline e ~/miniconda3)
-/ai_pipeline/
-/miniconda3/
+# dados/instalacoes pesadas dentro do projeto. Sem a barra final de proposito: podem ser
+# diretorios reais OU symlinks apontando pra outro disco - com "/ai_pipeline/" o git
+# ignorava so' o diretorio e o symlink aparecia como arquivo nao rastreado.
+/ai_pipeline
+/miniconda3
 
 # midia de trabalho relocada pra dentro do projeto (antes eram simlinks em ~/cenas e ~/fotos, hoje
 # sao diretorios reais aqui dentro) - nunca versionar: cenas de filme protegidas por direitos autorais

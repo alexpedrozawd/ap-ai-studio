@@ -10,11 +10,17 @@ outros dependem dele, ele nao depende de nenhum outro.
 import os
 
 # --- Caminhos ---
-# Parametrizados por variavel de ambiente: o projeto ja migrou de servidor uma vez
-# (/home/ap no Ubuntu -> /var/home/apsrv no Bazzite) e hardcode custou caro. O default
-# cobre a maquina atual; AP_AI_STUDIO_HOME cobre qualquer outra sem tocar no codigo.
-# No Bazzite (ostree) /home e' symlink pra /var/home - os dois caminhos funcionam.
-STUDIO_HOME = os.environ.get("AP_AI_STUDIO_HOME", "/var/home/apsrv/ap-ai-studio")
+# O default e' AUTO-LOCALIZAVEL: a raiz do estudio e' o diretorio deste arquivo. Isso
+# elimina o ultimo caminho fixo do projeto - o repositorio funciona clonado em qualquer
+# lugar, por qualquer usuario, sem editar codigo nem exportar variavel.
+#
+# Historico que justifica: o projeto ja migrou de servidor uma vez (/home/ap no Ubuntu ->
+# /var/home/apsrv no Bazzite) e cada caminho hardcoded virou um bug silencioso.
+#
+# A raiz contem o codigo (versionado) e, ignorados pelo git, ai_pipeline/ e miniconda3/ -
+# que podem ser diretorios reais ou symlinks pra onde houver espaco em disco.
+# AP_AI_STUDIO_HOME sobrescreve, se precisar apontar pra outro lugar.
+STUDIO_HOME = os.environ.get("AP_AI_STUDIO_HOME", os.path.dirname(os.path.abspath(__file__)))
 PIPELINE_PATH = os.path.join(STUDIO_HOME, "ai_pipeline")
 MINICONDA_DIR = os.path.join(STUDIO_HOME, "miniconda3")
 LOG_PATH = os.path.join(PIPELINE_PATH, "logs", "run_vfx.log")

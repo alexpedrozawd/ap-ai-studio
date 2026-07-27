@@ -10,7 +10,11 @@ import os
 
 COMFYUI_HOST = "127.0.0.1"
 COMFYUI_PORT = 8288
-VFX_DIR = os.environ.get("AP_AI_STUDIO_HOME", "/var/home/apsrv/ap-ai-studio")
+# Auto-localizavel: backend fica em <raiz>/webui/backend, entao a raiz e' dois niveis acima.
+VFX_DIR = os.environ.get(
+	"AP_AI_STUDIO_HOME",
+	os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+)
 COMFYUI_DIR = f"{VFX_DIR}/ai_pipeline/ComfyUI"
 
 VFX_PY = f"{VFX_DIR}/miniconda3/envs/vfx-pipeline/bin/python"
