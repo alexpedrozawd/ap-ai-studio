@@ -105,8 +105,8 @@ contaminar a GPU do desktop; e atualizações do Bazzite não quebram o ambiente
 | 4 | Migrar código NVIDIA → AMD | ✅ concluída (commit `fef3186`) |
 | 5 | Atualizar documentação (remover Ubuntu/NVIDIA) | ✅ concluída (commit `b14247b`) |
 | 6a | Contêiner distrobox + PyTorch ROCm | ✅ **GPU validada** (ver §3.1) |
-| 6b | ComfyUI, custom nodes, FaceFusion, demais ambientes | em andamento |
-| 6c | Download dos modelos | pendente |
+| 6b | ComfyUI, custom nodes, FaceFusion, demais ambientes | ✅ concluída, sem falhas |
+| 6c | Download dos modelos | 🔄 em andamento (~7,5 MB/s, 4 conexões) |
 | 7 | Regerar `requirements/` a partir dos ambientes reais | pendente |
 | 8 | Configurar e subir a webui (`systemd --user`) | pendente |
 
@@ -159,3 +159,56 @@ Registradas aqui em vez de travar o trabalho. Nenhuma bloqueia as etapas 3–5.
 
 3. **`tailscale0` na zona `trusted`.** Exige root. Precisa ser feito por você ao aplicar
    o item 10 do hardening, senão a webui fica inacessível depois do lockdown.
+
+
+---
+
+## 5. Achados durante o build (2026-07-26, noite)
+
+### 5.1 O ComfyUI nunca foi clonado — e o build não percebeu
+
+O diretório `ai_pipeline/ComfyUI` já existia, criado como **efeito colateral da suíte de
+testes** (`test_process_long_upscale...` faz `os.makedirs` em `PIPELINE_PATH`). O
+`git clone` recusa destino não-vazio, falhou, e o build seguiu: os cinco custom nodes
+foram instalados dentro de um ComfyUI que não existia. Só apareceu na revisão do log,
+porque o script registra falhas em vez de abortar.
+
+Correção dupla: a função `clonar()` agora trata destino não-vazio (clona num temporário e
+preenche lacunas sem sobrescrever), e o ComfyUI foi restaurado sem perturbar o download
+que já estava em curso no mesmo diretório.
+
+**Lição:** "seguir em caso de falha" precisa vir com verificação de resultado no fim, não
+só com o registro da falha. Um `main.py` ausente é detectável em uma linha.
+
+### 5.2 Runtime separado do código
+
+O `.gitignore` mostra que a arquitetura pretendida é **repositório == raiz do estúdio**
+(`/ai_pipeline` e `/miniconda3` ignorados dentro dele). O build criou o runtime noutro
+caminho, e `vfx_aliases.sh` procuraria o `run_vfx.py` no lugar errado.
+
+Miniconda **não é relocável** (shebangs com caminho absoluto), então mover estava fora de
+questão. Solução: a raiz passou a ser o repositório, com symlinks para os dados pesados.
+Aproveitando, o default de `STUDIO_HOME` virou **auto-localizável** (o diretório do
+próprio `vfx_config.py`) — o último caminho fixo do projeto deixou de existir.
+
+### 5.3 Download lento: limite por conexão, não de banda
+
+O `wget` de conexão única ficou em **3,0 MB/s** contra o CDN da HuggingFace, enquanto o
+`pip` alcançou ~40 MB/s no mesmo link. Testado `hf_transfer` (5,9 MB/s) e o modo Xet
+(inconclusivo). A solução que valeu foi trivial: **4 downloads em paralelo**, subindo a
+vazão agregada para **7,5 MB/s** sem trocar a ferramenta que já funcionava e retoma
+downloads parciais.
+
+### 5.4 O torch ROCm sobreviveu a todos os requirements
+
+Confirmado após instalar ComfyUI, 5 custom nodes, coqui-tts e demucs:
+
+| Ambiente | torch | HIP | GPU |
+|---|---|---|---|
+| `vfx-pipeline` | 2.11.0+rocm7.13.0 | 7.13.99004 | ✅ |
+| `tts-pipeline` | 2.11.0+rocm7.13.0 | 7.13.99004 | ✅ |
+| `noise-pipeline` | 2.11.0+rocm7.13.0 | 7.13.99004 | ✅ |
+
+FaceFusion com `onnxruntime 1.26.0` expondo apenas `CPUExecutionProvider` — como
+decidido. A reafirmação do torch depois de cada bloco de requirements (§2.1) provou-se
+necessária: era exatamente o que quebrava na era NVIDIA.
